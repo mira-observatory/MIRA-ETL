@@ -24,7 +24,7 @@ def run_pipeline(
     local_zip: Path | None,
     limit: int | None = None,
     force_reprocess: bool = False,
-) -> None:
+) -> str:
     """Run the connector selected exclusively by its source configuration."""
     validate_limit(limit)
     config = SourceConfig.load(config_dir, source)
@@ -44,7 +44,7 @@ def run_pipeline(
                 "SKIPPED - Period already processed successfully "
                 f"(source={config.source}, period={period})"
             )
-            return
+            return "SKIPPED"
         run_id = db.insert_run(
             source=config.source,
             period=period,
@@ -96,6 +96,7 @@ def run_pipeline(
                 source_system=config.source_system,
                 display_name=config.source_system,
             )
+            return "SUCCESS"
         except BaseException as exc:
             db.finish_run_after_error(run_id, str(exc) or type(exc).__name__)
             raise

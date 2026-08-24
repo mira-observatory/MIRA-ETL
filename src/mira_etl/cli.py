@@ -60,18 +60,48 @@ def main() -> None:
         )
         if args.local_zip is not None and len(periods) > 1:
             raise SystemExit("--local-zip cannot be used with a period range.")
+        processed = 0
+        skipped = 0
+        failed = 0
+        is_backfill = len(periods) > 1
         for index, period in enumerate(periods, start=1):
-            if len(periods) > 1:
+            if is_backfill:
                 print(f"Running period {period} ({index}/{len(periods)})...")
-            run_pipeline(
-                source=args.source,
-                period=period,
-                config_dir=args.config_dir,
-                work_dir=args.work_dir,
-                local_zip=args.local_zip,
-                limit=args.limit,
-                force_reprocess=args.force_reprocess,
+            try:
+                result = run_pipeline(
+                    source=args.source,
+                    period=period,
+                    config_dir=args.config_dir,
+                    work_dir=args.work_dir,
+                    local_zip=args.local_zip,
+                    limit=args.limit,
+                    force_reprocess=args.force_reprocess,
+                )
+            except Exception as exc:
+                if not is_backfill:
+                    raise
+                failed += 1
+                print(f"[{args.source}] {period} - ERROR: {exc}")
+                continue
+
+            if result == "SKIPPED":
+                skipped += 1
+                print(f"[{args.source}] {period} - SKIPPED (already processed)")
+            else:
+                processed += 1
+                print(f"[{args.source}] {period} - SUCCESS")
+
+        if is_backfill:
+            print(
+                "\nBackfill completed\n\n"
+                f"Source: {args.source}\n"
+                f"Range: {periods[0]} - {periods[-1]}\n\n"
+                f"Processed: {processed}\n"
+                f"Skipped: {skipped}\n"
+                f"Failed: {failed}"
             )
+            if failed:
+                raise SystemExit(1)
 
 
 def resolve_period(*, source: str, period: str | None, config_dir: Path) -> str:

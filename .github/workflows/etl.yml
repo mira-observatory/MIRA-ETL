@@ -13,7 +13,15 @@ on:
           - nicaragua_siscae
         default: costa_rica_sicop
       period:
-        description: Period in YYYYMM format (required for Guatemala and Costa Rica).
+        description: Single YYYYMM period for Guatemala or Costa Rica.
+        required: false
+        type: string
+      start_period:
+        description: First YYYYMM period for a Guatemala or Costa Rica backfill.
+        required: false
+        type: string
+      end_period:
+        description: Last YYYYMM period for a Guatemala or Costa Rica backfill.
         required: false
         type: string
       force_reprocess:
@@ -48,14 +56,44 @@ jobs:
       - name: Set period
         id: period
         shell: bash
+        env:
+          INPUT_PERIOD: ${{ inputs.period }}
+          INPUT_START_PERIOD: ${{ inputs.start_period }}
+          INPUT_END_PERIOD: ${{ inputs.end_period }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            period="${{ inputs.period }}"
-            if [[ ! "$period" =~ ^[0-9]{6}$ ]]; then
-              echo "A valid YYYYMM period is required for ${{ matrix.source }}." >&2
+            period="$INPUT_PERIOD"
+            start_period="$INPUT_START_PERIOD"
+            end_period="$INPUT_END_PERIOD"
+
+            validate_period() {
+              [[ "$1" =~ ^[0-9]{4}(0[1-9]|1[0-2])$ ]]
+            }
+
+            if [ -n "$period" ] && { [ -n "$start_period" ] || [ -n "$end_period" ]; }; then
+              echo "Use either period or start_period/end_period, not both." >&2
               exit 2
             fi
-            echo "value=$period" >> "$GITHUB_OUTPUT"
+            if [ -n "$period" ]; then
+              if ! validate_period "$period"; then
+                echo "period must be a valid YYYYMM value." >&2
+                exit 2
+              fi
+              echo "value=$period" >> "$GITHUB_OUTPUT"
+            elif [ -n "$start_period" ] && [ -n "$end_period" ]; then
+              if ! validate_period "$start_period" || ! validate_period "$end_period"; then
+                echo "start_period and end_period must be valid YYYYMM values." >&2
+                exit 2
+              fi
+              if [ "$start_period" -gt "$end_period" ]; then
+                echo "start_period must not be after end_period." >&2
+                exit 2
+              fi
+              echo "value=$start_period - $end_period" >> "$GITHUB_OUTPUT"
+            else
+              echo "Provide period, or provide both start_period and end_period." >&2
+              exit 2
+            fi
           else
             echo "value=$(date -u -d '1 month ago' +'%Y%m')" >> "$GITHUB_OUTPUT"
           fi
@@ -94,6 +132,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Reject historical range inputs
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          INPUT_START_PERIOD: ${{ inputs.start_period }}
+          INPUT_END_PERIOD: ${{ inputs.end_period }}
+        run: |
+          if [ -n "$INPUT_START_PERIOD" ] || [ -n "$INPUT_END_PERIOD" ]; then
+            echo "Nicaragua does not support period ranges." >&2
+            exit 2
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@v5
