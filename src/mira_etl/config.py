@@ -26,7 +26,7 @@ class SourceConfig:
         path = config_dir / f"{source}.json"
         if not path.is_file():
             raise FileNotFoundError(f"Source configuration not found: {path}")
-        with path.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8-sig") as fh:
             payload = json.load(fh)
         config = cls(**payload)
         if config.source != source:
@@ -87,7 +87,7 @@ class SourceConfig:
         load_dotenv()
         env_value = (
             os.environ.get("MIRA_JSON_BATCH_SIZE")
-            if self.download.get("type") == "http_zip_json"
+            if self.download.get("type") in {"http_zip_json", "http_jsonl_gz"}
             else None
         ) or os.environ.get("MIRA_ETL_BATCH_SIZE")
         value = int(env_value or self.processing.get("batch_size", 250))

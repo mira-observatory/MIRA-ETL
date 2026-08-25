@@ -12,7 +12,7 @@ CONFIG_DIR = Path(__file__).parents[1] / "config" / "sources"
 
 
 class ConnectorRoutingTest(unittest.TestCase):
-    def test_discovers_the_three_configured_extraction_types(self) -> None:
+    def test_discovers_the_configured_extraction_types(self) -> None:
         configs = SourceConfig.discover(CONFIG_DIR)
         actual = {config.source: config.download["type"] for config in configs}
         self.assertEqual(
@@ -20,6 +20,7 @@ class ConnectorRoutingTest(unittest.TestCase):
             {
                 "costa_rica_sicop": "http_zip_csv",
                 "guatemala_guatecompras": "http_zip_json",
+                "honduras_oncae": "http_jsonl_gz",
                 "nicaragua_siscae": "html_session_scrape",
             },
         )
@@ -31,6 +32,7 @@ class ConnectorRoutingTest(unittest.TestCase):
             {
                 "costa_rica_sicop": "relational_awards_csv",
                 "guatemala_guatecompras": "ocds",
+                "honduras_oncae": "ocds",
                 "nicaragua_siscae": "active_procedures",
             },
         )

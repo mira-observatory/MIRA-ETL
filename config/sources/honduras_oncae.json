@@ -1,0 +1,23 @@
+﻿{
+  "source": "honduras_oncae",
+  "country_code": "HN",
+  "source_system": "HonduCompras ONCAE OCDS",
+  "connector_version": "hn-oncae-0.1.0",
+  "transform": {
+    "adapter": "ocds",
+    "id_prefix": "MIRA-HN-"
+  },
+  "download": {
+    "type": "http_jsonl_gz",
+    "bootstrap_url": "https://data.open-contracting.org/en/publication/122",
+    "url_template": "https://data.open-contracting.org/en/publication/122/download?name={year}.jsonl.gz"
+  },
+  "files": {
+    "required": [],
+    "optional": []
+  },
+  "csv": {},
+  "processing": {
+    "batch_size": 250
+  }
+}

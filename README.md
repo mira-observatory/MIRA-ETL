@@ -10,6 +10,13 @@ Costa Rica SICOP (descarga ZIP periodica):
 https://dlsaobservatorioprod.blob.core.windows.net/fs-synapse-observatorio-produccion/Zip/{AAAAMM}.zip
 ```
 
+Honduras ONCAE / HonduCompras (OCDS publicado en el OCP Data Registry, un
+archivo JSON Lines comprimido por año -- ver `docs/honduras_oncae_mapping.md`):
+
+```text
+https://data.open-contracting.org/en/publication/122/download?name={AAAA}.jsonl.gz
+```
+
 Nicaragua SISCAE (scraping HTML con sesion, sin API; solo Procesos Vigentes por ahora -- ver `docs/nicaragua_siscae_mapping.md`):
 
 ```text
@@ -89,9 +96,20 @@ $env:SUPABASE_DB_URL="postgresql://..."
 .venv\Scripts\mira-etl run --source nicaragua_siscae
 ```
 
-Las fuentes `http_zip_json` se leen incrementalmente con `ijson` y se cargan en
-lotes. Guatemala usa este mecanismo hoy; otros paises pueden reutilizarlo con
-su propio transformador. El tamaño del lote se configura por entorno:
+Ejecutar el conector de Honduras (descarga el `.jsonl.gz` del año y carga solo el mes indicado):
+
+```powershell
+$env:SUPABASE_DB_URL="postgresql://..."
+.venv\Scripts\mira-etl run --source honduras_oncae --period 202410
+```
+
+Si ya descargaste el archivo anual a mano, `--local-zip` acepta ese `.jsonl.gz` y evita volver a bajarlo:
+
+```powershell
+.venv\Scripts\mira-etl run --source honduras_oncae --period 202410 --local-zip 2024.jsonl.gz
+```
+
+Las fuentes `http_zip_json` (Guatemala) se leen incrementalmente con `ijson`, y las `http_jsonl_gz` (Honduras) línea por línea sobre el gzip; ambas cargan en lotes. Otros países pueden reutilizar cualquiera de los dos mecanismos con su propio transformador. El tamaño del lote se configura por entorno:
 
 ```powershell
 $env:MIRA_JSON_BATCH_SIZE="250"
@@ -100,8 +118,10 @@ $env:MIRA_JSON_BATCH_SIZE="250"
 Si no se define, el ETL usa `250`. En cualquier conector, `--limit N` limita
 registros durante pruebas puntuales.
 
-Cada país se ejecuta individualmente. Guatemala y Costa Rica usan `--period`
-para seleccionar un mes o un rango mensual inclusivo. Nicaragua es un flujo separado: SISCAE
+Cada país se ejecuta individualmente. Guatemala, Honduras y Costa Rica usan
+`--period` para seleccionar la descarga histórica; en Honduras el archivo
+publicado es anual, así que el ETL descarga el año y filtra el mes pedido.
+Nicaragua es un flujo separado: SISCAE
 solo expone el estado vigente al momento de ejecutar, por lo que el ETL etiqueta
 la corrida automáticamente con el mes actual.
 

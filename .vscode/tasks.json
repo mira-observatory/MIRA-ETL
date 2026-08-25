@@ -204,7 +204,8 @@
       "description": "País/fuente que deseas cargar",
       "options": [
         "guatemala_guatecompras",
-        "costa_rica_sicop"
+        "costa_rica_sicop",
+        "honduras_oncae"
       ],
       "default": "guatemala_guatecompras"
     },

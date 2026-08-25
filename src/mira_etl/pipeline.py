@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -11,7 +12,7 @@ from mira_etl.config import SourceConfig
 from mira_etl.adapters import transform_batch, transform_record
 from mira_etl.csvio import read_csv_rows
 from mira_etl.db import Database
-from mira_etl.extract import extract_zip, obtain_zip, resolve_dataset_dir
+from mira_etl.extract import extract_zip, obtain_jsonl_gz, obtain_zip, resolve_dataset_dir
 from mira_etl.validation import validate_records
 
 
@@ -62,6 +63,17 @@ def run_pipeline(
                     period=period,
                     connector_version=config.connector_version,
                     extract_dir=extract_dir,
+                    limit=limit,
+                )
+            elif download_type == "http_jsonl_gz":
+                jsonl_path = obtain_jsonl_gz(config, period, work_dir, local_zip)
+                process_jsonl_records(
+                    db=db,
+                    run_id=run_id,
+                    config=config,
+                    period=period,
+                    connector_version=config.connector_version,
+                    jsonl_path=jsonl_path,
                     limit=limit,
                 )
             else:
@@ -325,6 +337,106 @@ def process_json_records(
     insert_row_count(db, run_id, "mart", "processes", totals["mart"])
 
 
+def process_jsonl_records(
+    *,
+    db: Database,
+    run_id: int,
+    config: SourceConfig,
+    period: str,
+    connector_version: str,
+    jsonl_path: Path,
+    limit: int | None = None,
+) -> None:
+    """Stream a gzipped JSON Lines file, keeping only the period's records.
+
+    The file covers a whole year, so each line is filtered by its release date
+    before any work is done on it (see period_of).
+    """
+    source_file_id = db.insert_source_file(
+        run_id=run_id,
+        source=config.source,
+        period=period,
+        filename=jsonl_path.name,
+        file_hash=file_hash(jsonl_path),
+        row_count=0,
+    )
+    batch_size = config.batch_size
+    record_limit = limit if limit is not None else config.record_limit
+    print(
+        f"JSONL {jsonl_path.name}: procesamiento por streaming en lotes de "
+        f"{batch_size:,} items; se conservan solo los del periodo {period}."
+    )
+    raw_batch: list[dict[str, Any]] = []
+    record_batch: list[dict[str, Any]] = []
+    totals = {"raw": 0, "staging": 0, "validations": 0, "mart": 0}
+    discarded = 0
+
+    with gzip.open(jsonl_path, "rt", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            row = json.loads(line)
+            if not isinstance(row, dict):
+                raise ValueError("Every JSONL line must be a JSON object")
+            if period_of(row) != period:
+                discarded += 1
+                continue
+            raw_batch.append(row)
+            record_batch.append(
+                build_json_record(
+                    config=config,
+                    period=period,
+                    connector_version=connector_version,
+                    source_row=row,
+                )
+            )
+            if len(raw_batch) >= batch_size:
+                flush_record_batch(
+                    db=db, run_id=run_id, source_file_id=source_file_id,
+                    source=config.source, period=period, raw_batch=raw_batch,
+                    record_batch=record_batch, batch_size=batch_size, totals=totals,
+                    dataset_name=jsonl_path.name, dataset_kind="JSONL",
+                )
+            if record_limit is not None and totals["raw"] + len(raw_batch) >= record_limit:
+                break
+
+    if raw_batch:
+        flush_record_batch(
+            db=db, run_id=run_id, source_file_id=source_file_id,
+            source=config.source, period=period, raw_batch=raw_batch,
+            record_batch=record_batch, batch_size=batch_size, totals=totals,
+            dataset_name=jsonl_path.name, dataset_kind="JSONL",
+        )
+
+    print(
+        f"JSONL {jsonl_path.name}: {totals['raw']:,} items trabajados; "
+        f"{discarded:,} descartados por estar fuera del periodo {period}."
+    )
+    db.update_source_file_row_count(source_file_id, totals["raw"])
+    insert_row_count(db, run_id, "raw", "source_rows", totals["raw"])
+    insert_row_count(db, run_id, "staging", "normalized_candidates", totals["staging"])
+    insert_row_count(db, run_id, "audit", "validation_results", totals["validations"])
+    insert_row_count(db, run_id, "mart", "processes", totals["mart"])
+
+
+def period_of(row: dict[str, Any]) -> str | None:
+    """AAAAMM of the compiled release date, as published by the source.
+
+    The date is read as local time of the publisher, without converting to UTC,
+    so a process always belongs to the month its own system reports. Rows
+    without a usable date belong to no period and are discarded.
+    """
+    compiled = row.get("compiledRelease") or row
+    value = compiled.get("date")
+    if not isinstance(value, str) or len(value) < 7:
+        return None
+    year, separator, month = value[:4], value[4:5], value[5:7]
+    if not year.isdigit() or separator != "-" or not month.isdigit():
+        return None
+    return f"{year}{month}"
+
+
 def build_json_record(
     *,
     config: SourceConfig,
@@ -341,13 +453,14 @@ def flush_record_batch(
     period: str, raw_batch: list[dict[str, Any]],
     record_batch: list[dict[str, Any]], batch_size: int,
     totals: dict[str, int], dataset_name: str | None = None,
+    dataset_kind: str = "JSON",
 ) -> None:
     if dataset_name is not None:
         start = totals["raw"] + 1
         end = totals["raw"] + len(raw_batch)
         found_word = "encontrado" if len(raw_batch) == 1 else "encontrados"
         print(
-            f"JSON {dataset_name}: "
+            f"{dataset_kind} {dataset_name}: "
             f"{format_quantity(len(raw_batch), 'item', 'items')} {found_word}; "
             f"se trabajaran ahora filas {start:,}-{end:,}."
         )

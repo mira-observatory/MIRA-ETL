@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import unicodedata
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -19,6 +20,30 @@ MINIMUM_FIELDS = [
     "process_status",
     "publication_date",
 ]
+
+STATUS_DETAILS_MAP = {
+    "elaboracion": "PLANNED",
+    "revisado": "PUBLISHED",
+    "publicado": "PUBLISHED",
+    "recepcion de ofertas": "OPEN",
+    "evaluacion": "EVALUATION",
+    "adjudicado": "AWARDED",
+    "fracasado": "DESERTED",
+    "fracasados": "DESERTED",
+    "desierto": "DESERTED",
+    "cancelado": "CANCELLED",
+    "suspendido": "SUSPENDED",
+    "finalizado": "COMPLETED",
+}
+
+TENDER_STATUS_MAP = {
+    "active": "OPEN",
+    "planned": "PLANNED",
+    "complete": "COMPLETED",
+    "cancelled": "CANCELLED",
+    "unsuccessful": "DESERTED",
+    "withdrawn": "CANCELLED",
+}
 
 
 def build_record(
@@ -79,6 +104,22 @@ def build_record(
                 "category_normalised": None,
             })
 
+    if not items and (award.get("description") or tender.get("description")):
+        desc = award.get("description") or tender.get("description")
+        item_id = stable_id(
+            config.country_code, source_record_id,
+            desc or "0",
+            prefix=item_prefix,
+        )
+        items.append({
+            "item_id": item_id,
+            "source_item_id": None,
+            "line_number": None,
+            "item_description": desc,
+            "category_source": None,
+            "category_normalised": None,
+        })
+
     normalised_awards: list[dict[str, Any]] = []
     award_sections = awards or contracts
     for position, source_award in enumerate(award_sections):
@@ -91,6 +132,13 @@ def build_record(
             if source_item.get("id") is not None
             and str(source_item["id"]) in item_ids_by_source
         ]
+        if not linked_item_ids and items:
+            linked_item_ids = [items[0]["item_id"]]
+        award_date = (
+            source_award.get("dateSigned")
+            or source_award.get("date")
+            or (contracts[0].get("dateSigned") if contracts else None)
+        )
         normalised_awards.append({
             "award_id": stable_id(
                 config.country_code, source_record_id,
@@ -98,18 +146,16 @@ def build_record(
             ),
             "source_award_id": source_award_id,
             "item_ids": linked_item_ids,
-            "award_date": parse_datetime(
-                source_award.get("date") or source_award.get("dateSigned")
-            ),
+            "award_date": parse_datetime(award_date),
             "awarded_amount": parse_decimal(value.get("amount")),
             "currency_code": value.get("currency"),
             "suppliers": [
                 {
                     "supplier_name": party.get("name"),
                     "supplier_id_source": party.get("id"),
-                    "supplier_tax_id": identifier_value(party),
+                    "supplier_tax_id": entity_tax_id(party, parties),
                     "supplier_type": normalise_supplier_type(
-                        party_by_id(parties, party.get("id"))
+                        party_by_id(parties, party.get("id")) or party
                     ),
                 }
                 for party in award_suppliers
@@ -124,7 +170,15 @@ def build_record(
     for contract_item in contracts:
         target = awards_by_source.get(str(contract_item.get("awardID")))
         if target is None:
+            if not normalised_awards and contract_item.get("value"):
+                pass
             continue
+        if target.get("awarded_amount") is None and contract_item.get("value"):
+            contract_value = contract_item.get("value") or {}
+            target["awarded_amount"] = parse_decimal(contract_value.get("amount"))
+            target["currency_code"] = contract_value.get("currency")
+        if target.get("award_date") is None and contract_item.get("dateSigned"):
+            target["award_date"] = parse_datetime(contract_item.get("dateSigned"))
         seen_suppliers = {
             (item.get("supplier_id_source"), item.get("supplier_tax_id"), item.get("supplier_name"))
             for item in target["suppliers"]
@@ -133,9 +187,9 @@ def build_record(
             candidate = {
                 "supplier_name": party.get("name"),
                 "supplier_id_source": party.get("id"),
-                "supplier_tax_id": identifier_value(party),
+                "supplier_tax_id": entity_tax_id(party, parties),
                 "supplier_type": normalise_supplier_type(
-                    party_by_id(parties, party.get("id"))
+                    party_by_id(parties, party.get("id")) or party
                 ),
             }
             key = (
@@ -152,17 +206,17 @@ def build_record(
             source_record_id,
             prefix=id_prefix,
         ),
-        "process_number": tender.get("id") or source_record_id,
+        "process_number": str(tender.get("id") or source_record_id),
         "title": tender.get("title") or award.get("title"),
-        "description": tender.get("description") or tender.get("title"),
+        "description": tender.get("description") or tender.get("title") or award.get("description"),
         "buyer_name": buyer.get("name"),
-        "buyer_id_source": buyer.get("id"),
-        "buyer_tax_id": identifier_value(buyer),
+        "buyer_id_source": entity_id_source(buyer),
+        "buyer_tax_id": entity_tax_id(buyer, parties),
         "buyers": [
             {
                 "buyer_name": item.get("name"),
-                "buyer_id_source": item.get("id"),
-                "buyer_tax_id": identifier_value(item),
+                "buyer_id_source": entity_id_source(item),
+                "buyer_tax_id": entity_tax_id(item, parties),
             }
             for item in buyer_parties
         ],
@@ -171,14 +225,14 @@ def build_record(
             or tender.get("procurementMethod")
         ),
         "process_status": normalise_status(
-            tender.get("status"),
+            tender,
             award=award,
             contract=contract,
         ),
         "source_status": (
-            contract.get("statusDetails")
+            tender.get("statusDetails")
+            or contract.get("statusDetails")
             or award.get("statusDetails")
-            or tender.get("statusDetails")
             or contract.get("status")
             or award.get("status")
             or tender.get("status")
@@ -186,12 +240,16 @@ def build_record(
         "publication_date": parse_datetime(
             tender.get("datePublished")
             or (tender.get("tenderPeriod") or {}).get("startDate")
+            or compiled.get("date")
         ),
         "closing_date": parse_datetime(
             (tender.get("tenderPeriod") or {}).get("endDate")
         ),
         "estimated_amount": parse_decimal(estimated_value.get("amount")),
-        "currency_code": estimated_value.get("currency"),
+        "currency_code": (
+            estimated_value.get("currency")
+            or (normalised_awards[0].get("currency_code") if normalised_awards else None)
+        ),
         "items": items,
         "awards": normalised_awards,
         "country_code": config.country_code,
@@ -219,71 +277,98 @@ def build_record(
     return record
 
 
-def all_suppliers(
-    awards: list[dict[str, Any]],
-    contracts: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Return every distinct supplier referenced by awards or contracts."""
-    result: list[dict[str, Any]] = []
-    seen: set[tuple[str | None, str | None, str | None]] = set()
-    for section in [*awards, *contracts]:
-        for supplier in section.get("suppliers") or []:
-            key = (
-                supplier.get("id"),
-                identifier_value(supplier),
-                supplier.get("name"),
-            )
-            if key not in seen:
-                seen.add(key)
-                result.append(supplier)
-    return result
-
-
 def all_buyers(
     compiled: dict[str, Any],
     tender: dict[str, Any],
 ) -> list[dict[str, Any]]:
     """Return every distinct buyer/procuring entity exposed by OCDS."""
-    candidates = [compiled.get("buyer"), tender.get("procuringEntity")]
+    parties = compiled.get("parties") or []
+    primary = resolve_buyer(compiled, tender)
+    candidates = [primary, compiled.get("buyer"), tender.get("procuringEntity")]
     candidates.extend(
         party
-        for party in compiled.get("parties") or []
+        for party in parties
         if {str(role).lower() for role in party.get("roles") or []}
         & {"buyer", "procuringentity"}
     )
     result: list[dict[str, Any]] = []
     seen: set[tuple[str | None, str | None, str | None]] = set()
     for buyer in candidates:
-        if not isinstance(buyer, dict):
+        if not isinstance(buyer, dict) or not buyer:
             continue
-        key = (buyer.get("id"), identifier_value(buyer), buyer.get("name"))
-        if key not in seen:
+        resolved = resolve_party_root(parties, buyer)
+        key = (
+            resolved.get("id"),
+            entity_tax_id(resolved, parties),
+            resolved.get("name"),
+        )
+        if key not in seen and any(part for part in key):
             seen.add(key)
-            result.append(buyer)
+            result.append(resolved)
     return result
 
 
-def first_item(*sections: dict[str, Any]) -> dict[str, Any]:
-    for section in sections:
-        items = section.get("items") or []
-        if items:
-            return items[0]
-    return {}
+def resolve_buyer(compiled: dict[str, Any], tender: dict[str, Any]) -> dict[str, Any]:
+    parties = compiled.get("parties") or []
+    buyer = compiled.get("buyer") or tender.get("procuringEntity") or {}
+    return resolve_party_root(parties, buyer)
+
+
+def resolve_party_root(parties: list[dict[str, Any]], party: dict[str, Any]) -> dict[str, Any]:
+    current = party
+    party_id = current.get("id")
+    if party_id:
+        current = party_by_id(parties, party_id) or current
+    seen: set[str] = set()
+    while True:
+        parents = current.get("memberOf") or []
+        parent_id = parents[0].get("id") if parents else None
+        if not parent_id or str(parent_id) in seen:
+            return current
+        seen.add(str(parent_id))
+        current = party_by_id(parties, parent_id) or parents[0]
 
 
 def party_by_id(
     parties: list[dict[str, Any]],
-    party_id: str | None,
+    party_id: Any,
 ) -> dict[str, Any]:
+    if party_id is None:
+        return {}
     return next(
-        (party for party in parties if party.get("id") == party_id),
+        (party for party in parties if str(party.get("id")) == str(party_id)),
         {},
     )
 
 
-def identifier_value(party: dict[str, Any]) -> str | None:
+def entity_tax_id(party: dict[str, Any], parties: list[dict[str, Any]] | None = None) -> str | None:
+    if parties and party.get("id"):
+        full = party_by_id(parties, party.get("id"))
+        if full:
+            party = {**party, **full}
     identifier = party.get("identifier") or {}
-    return identifier.get("id") or strip_identifier_prefix(party.get("id"))
+    scheme = str(identifier.get("scheme") or "").upper()
+    if scheme in {"HN-RTN", "GT-NIT", "CR-CPJ", "HN_RTN", "GT_NIT"}:
+        return str(identifier.get("id")) if identifier.get("id") else None
+    if scheme == "X-HN-ONCAE-CE":
+        return None
+    party_id = str(party.get("id") or "")
+    if party_id.startswith("HN-RTN-"):
+        return party_id[len("HN-RTN-"):]
+    if party_id.startswith("GT-NIT-"):
+        return party_id[len("GT-NIT-"):]
+    if identifier.get("id") and not scheme.startswith("X-"):
+        return str(identifier.get("id"))
+    return strip_identifier_prefix(party.get("id"))
+
+
+def entity_id_source(party: dict[str, Any]) -> str | None:
+    identifier = party.get("identifier") or {}
+    return str(identifier.get("id") or party.get("id") or "") or None
+
+
+def identifier_value(party: dict[str, Any]) -> str | None:
+    return entity_tax_id(party) or entity_id_source(party)
 
 
 def strip_identifier_prefix(value: str | None) -> str | None:
@@ -293,34 +378,55 @@ def strip_identifier_prefix(value: str | None) -> str | None:
 
 
 def first_release_url(source_row: dict[str, Any]) -> str | None:
+    compiled = source_row.get("compiledRelease") or source_row
+    sources = compiled.get("sources")
+    if isinstance(sources, dict) and sources.get("url"):
+        return str(sources["url"])
+    if isinstance(sources, list):
+        for s in sources:
+            if isinstance(s, dict) and s.get("url"):
+                return str(s["url"])
     releases = source_row.get("releases") or []
     return releases[-1].get("url") if releases else None
 
 
 def normalise_status(
-    tender_status: str | None,
+    tender: dict[str, Any] | str | None,
     *,
-    award: dict[str, Any],
-    contract: dict[str, Any],
+    award: dict[str, Any] | None = None,
+    contract: dict[str, Any] | None = None,
 ) -> str:
-    if contract:
-        status = str(contract.get("status") or "").lower()
-        if status in {"complete", "terminated"}:
-            return "COMPLETED"
-        if status == "cancelled":
-            return "CANCELLED"
+    tender_dict = tender if isinstance(tender, dict) else {}
+    tender_status = tender if isinstance(tender, str) else tender_dict.get("status")
+    award = award or {}
+    contract = contract or {}
+
+    contract_status = str(contract.get("status") or "").lower()
+    if contract_status in {"complete", "terminated"}:
+        return "COMPLETED"
+    if contract_status == "cancelled":
+        return "CANCELLED"
+    if contract.get("dateSigned"):
         return "CONTRACTED"
+
+    status_details = tender_dict.get("statusDetails")
+    if status_details:
+        mapped = STATUS_DETAILS_MAP.get(status_key(status_details))
+        if mapped:
+            return mapped
+
     if award:
         return "CANCELLED" if award.get("status") == "cancelled" else "AWARDED"
+
     status = str(tender_status or "").lower()
-    return {
-        "active": "OPEN",
-        "planned": "PLANNED",
-        "complete": "COMPLETED",
-        "cancelled": "CANCELLED",
-        "unsuccessful": "DESERTED",
-        "withdrawn": "CANCELLED",
-    }.get(status, "PUBLISHED")
+    return TENDER_STATUS_MAP.get(status, "PUBLISHED")
+
+
+def status_key(value: Any) -> str:
+    if value is None:
+        return ""
+    text = unicodedata.normalize("NFKD", str(value).strip().lower())
+    return "".join(char for char in text if not unicodedata.combining(char))
 
 
 def normalise_supplier_type(party: dict[str, Any]) -> str:
@@ -334,11 +440,11 @@ def normalise_supplier_type(party: dict[str, Any]) -> str:
     return "UNKNOWN"
 
 
-def parse_datetime(value: str | None) -> datetime | None:
+def parse_datetime(value: Any) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except ValueError:
         return None
 

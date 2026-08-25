@@ -10,18 +10,19 @@ on:
         options:
           - guatemala_guatecompras
           - costa_rica_sicop
+          - honduras_oncae
           - nicaragua_siscae
         default: costa_rica_sicop
       period:
-        description: Single YYYYMM period for Guatemala or Costa Rica.
+        description: Single YYYYMM period for Guatemala, Costa Rica, or Honduras.
         required: false
         type: string
       start_period:
-        description: First YYYYMM period for a Guatemala or Costa Rica backfill.
+        description: First YYYYMM period for a Guatemala, Costa Rica, or Honduras backfill.
         required: false
         type: string
       end_period:
-        description: Last YYYYMM period for a Guatemala or Costa Rica backfill.
+        description: Last YYYYMM period for a Guatemala, Costa Rica, or Honduras backfill.
         required: false
         type: string
       force_reprocess:
@@ -42,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source: ${{ fromJSON(github.event_name == 'schedule' && '["guatemala_guatecompras","costa_rica_sicop"]' || format('["{0}"]', inputs.source)) }}
+        source: ${{ fromJSON(github.event_name == 'schedule' && '["guatemala_guatecompras","costa_rica_sicop","honduras_oncae"]' || format('["{0}"]', inputs.source)) }}
     concurrency:
       group: etl-${{ matrix.source }}
       cancel-in-progress: false
