@@ -230,9 +230,35 @@ devuelve un solo proceso anterior a 2026:
    rango incluye 2020-2025; el portal simplemente no publica nada de esos
    anios.
 
+### El registro OCP tampoco lo tiene (revisado 2026-08-26)
+
+Se reviso https://data.open-contracting.org, que es de donde sale el dataset
+de Honduras que ya usa MIRA. **Nicaragua no publica OCDS.** El registro tiene
+134 datasets de 72 paises y la cadena "nicaragua" no aparece ni una vez en el
+JSON completo del registro (`/en/publications.json`, 768 KB). Los paises con
+N son Nepal, Netherlands, Nigeria, North Macedonia y Norway.
+
+Centroamerica en el registro OCP:
+
+| pais | publicador | rango |
+|---|---|---|
+| Honduras | ONCAE | 2005-2026 (el que usa MIRA) |
+| Honduras | SEFIN | 2012-2026 |
+| Honduras | IAIP | 2020-2023 |
+| Honduras | SISOCS | 2018 |
+| Guatemala | Ministerio de Finanzas Publicas | 2020-2026 |
+| Costa Rica | Poder Judicial | 2018-2023 |
+| Panama | DGCP | 2013-2024 |
+| **Nicaragua** | **ninguno** | **--** |
+| El Salvador | ninguno | -- |
+
+Nicaragua figura en un diagnostico de la OEA sobre la *factibilidad* de
+adoptar OCDS en la region, no como publicador. Su dato vive solo en el HTML
+de SISCAE, y solo el ejercicio en curso.
+
 Si en algun momento se necesita 2023-2025 habra que pedirlo por otra via
 (solicitud de acceso a la informacion a la DGCE, o un volcado directo). No es
-un limite del conector.
+un limite del conector, ni algo que se resuelva cambiando de fuente.
 - `buyer_tax_id`, `buyer_id_source`, `supplier_type`, `category_normalised`,
   `estimated_amount`: no expuestos por la fuente en ningun punto revisado.
 - `award_date`: SISCAE no publica fecha de adjudicacion propia. "Ultima
