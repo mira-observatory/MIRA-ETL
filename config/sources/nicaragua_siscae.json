@@ -2,14 +2,18 @@
   "source": "nicaragua_siscae",
   "country_code": "NI",
   "source_system": "SISCAE Nicaragua",
-  "connector_version": "ni-siscae-0.1.0",
+  "connector_version": "ni-siscae-0.2.0",
   "download": {
     "type": "html_session_scrape",
     "base_url": "https://www.gestion.nicaraguacompra.gob.ni/siscae/portal/adquisiciones-gestion/busquedaProcedimientosVigentes?proc_estado=VIGENTE"
   },
   "files": {
-    "required": ["procesos_vigentes"],
-    "optional": []
+    "required": [
+      "procesos_vigentes"
+    ],
+    "optional": [
+      "procesos_adjudicados"
+    ]
   },
   "csv": {}
 }

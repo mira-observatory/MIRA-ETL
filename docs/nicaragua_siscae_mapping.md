@@ -119,16 +119,97 @@ conector, no de una auditoria estadistica sobre el dataset completo (~422-430
 procesos vigentes en un momento dado). No se han calculado porcentajes de
 ausencia por campo para Nicaragua todavia.
 
-## Pendiente (fuera de alcance de esta version)
+## Adjudicaciones (resuelto en ni-siscae-0.2.0, 2026-08-26)
 
-- **Adjudicaciones (proveedor, RUC, monto adjudicado):** el mecanismo de
-  extraccion (Mas Datos -> Adjudicacion -> Volver) esta prototipado pero no es
-  confiable -- SISCAE no siempre renderiza el boton "Adjudicacion", incluso
-  para el mismo proceso en corridas consecutivas. Se integrara en un conector
-  separado (`nicaragua_siscae_adjudicados` o una extension de este) una vez
-  resuelto.
-- **Historico anterior al periodo vigente:** el filtro de año ("Ejercicio")
-  del buscador avanzado de SISCAE aun no se ha resuelto; el conector actual
-  solo trae el estado presente del sistema.
+Nicaragua cargaba con cero adjudicaciones y cero proveedores. La causa no era
+la navegacion "Mas Datos -> Adjudicacion" que se creia poco confiable: era el
+**endpoint**. `busquedaProcedimientosVigentes?proc_estado=VIGENTE` solo puede
+devolver procesos VIGENTES, que por definicion todavia no tienen adjudicacion.
+Ninguna cantidad de reintentos sobre ese listado iba a producir un solo
+proveedor.
+
+El portal tiene un segundo buscador, "Todos los Procesos"
+(`busqueda?accion=todos`), que expone el estado como checkbox: VIGENTE,
+EJECUCION, CANCELADO, CERRADO, DESIERTO, **ADJUDICADO**, SUSPENDIDO. Las filas
+salen con el mismo formato que el listado de vigentes, asi que
+`parse_active_procedures_page` las parsea sin cambios.
+
+Medido contra el portal real el 2026-08-26:
+
+| | |
+|---|---|
+| Procesos ADJUDICADO obtenidos | 1,129 (1,129 unicos) |
+| Tiempo de la corrida completa | 465 s |
+| Filas con codificacion rota | 0 |
+
+Reparto por modalidad: 1,000 CONTRATACION MENOR, 77 LICITACION SELECTIVA,
+21 CONTRATACION SIMPLIFICADA, 18 LICITACION PUBLICA, 7 CONCURSO PARA
+CONSULTORES, 1 comparacion de calificaciones BCIE.
+
+### Dos cosas que estaban rotas en silencio
+
+**La paginacion se saltaba registros.** Sin un `ordenItems` explicito, SISCAE
+pagina sobre un resultado sin orden estable y las filas se barajan entre
+peticiones. Medido sobre 5 paginas de 10: sin orden, 32 procesos distintos de
+50 recolectados (las paginas avanzaban 1, luego 10, luego 5). Con
+`ordenItems=PorFechaPublicacion`, 48 de 50. Los duplicados son inofensivos
+(el mart hace upsert por `source_record_id`); los registros saltados no lo
+eran. El conector fija el orden y ademas deduplica.
+
+**La codificacion.** SISCAE sirve Latin-1 sin declararlo de forma fiable. Sin
+forzarlo, cada nombre de institucion acentuado entraba a la base como
+mojibake -- el tipo de dano que nadie nota hasta que el dato ya esta
+publicado.
+
+### El detalle de adjudicacion
+
+Proveedor, RUC, monto y moneda viven detras de
+`listado -> [Mas Datos] -> [Adjudicacion] -> [Volver]`. El boton
+"Adjudicacion" es un `<input type=submit>`, **no** un enlace con
+`_link_hidden_` como el resto de la navegacion del portlet; buscarlo como
+enlace es lo mas probable que hizo concluir que SISCAE lo renderiza "de forma
+intermitente". Verificado: `Volver` si restaura el listado (misma pagina,
+mismas 100 filas), y un proceso expone la pestana o no de forma consistente.
+
+Ejemplos reales extraidos:
+
+- `ENERGIA ELECTRICA SOL Y VIENTO SOCIEDAD ANONIMA - J0310000350337`,
+  US$ 1,336,229.69 (ENATREL, licitacion BCIE)
+- `NARVAEZ SANDOVAL, JUAN ANDRES - 0410401930001Y`, C$ 7,324,833.36
+  (Alcaldia Potosi, licitacion selectiva)
+
+La fuente escribe la moneda como simbolo (`US$` / `C$`), nunca como codigo;
+el conector normaliza a USD / NIO. Leer `C$` como dolar inflaria un monto
+nicaraguense unas 36 veces.
+
+**Solo una minoria de los procesos adjudicados publica ese detalle.** El 89%
+del corpus es CONTRATACION MENOR (compra menor), que no expone la pestana.
+No se logro establecer la tasa exacta: las muestras tomadas son chicas y
+pueden estar sesgadas, porque tras cada `Volver` el listado se vuelve a
+consultar y los indices posicionales podrian no apuntar al mismo registro.
+Queda como medicion pendiente, no como afirmacion.
+
+Costo: 3 peticiones por proceso. Medido, con paginas de 10 filas, ~8 s por
+proceso; con paginas de 100 filas, ~26 s (el formulario que hay que reenviar
+pesa 728 KB en vez de 114 KB). Por eso `scrape_awarded_procedures` acepta
+`award_detail_limit`: el corpus se recorre por lotes en vez de castigar un
+portal que corre en una instancia unica y corta conexiones bajo carga
+sostenida.
+
+## Pendiente
+
+- **Tasa real de publicacion del detalle de adjudicacion**, medida sobre una
+  muestra aleatoria y no sobre indices consecutivos de la primera pagina.
+- **Colisiones de `source_record_id`:** 3 de 1,129 procesos comparten
+  (tipo, numero, institucion) y colapsan en un mismo id. Agregar la
+  descripcion a la clave lo resolveria, pero **cambiaria todos los
+  `process_id` de Nicaragua**, con el costo de migracion que eso implica
+  sobre datos ya cargados. Es una decision del dueno del modelo, no del
+  conector.
+- **Historico anterior a 2026:** el selector "Ejercicio" del buscador solo
+  ofrece 2026 en este momento.
 - `buyer_tax_id`, `buyer_id_source`, `supplier_type`, `category_normalised`,
   `estimated_amount`: no expuestos por la fuente en ningun punto revisado.
+- `award_date`: SISCAE no publica fecha de adjudicacion propia. "Ultima
+  Actualizacion" es lo mas cercano, y llamarla fecha de adjudicacion seria
+  inventar una precision que la fuente no da.
