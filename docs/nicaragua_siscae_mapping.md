@@ -256,9 +256,33 @@ Nicaragua figura en un diagnostico de la OEA sobre la *factibilidad* de
 adoptar OCDS en la region, no como publicador. Su dato vive solo en el HTML
 de SISCAE, y solo el ejercicio en curso.
 
-Si en algun momento se necesita 2023-2025 habra que pedirlo por otra via
+### Fuentes descartadas (revisadas 2026-08-26)
+
+| fuente | resultado |
+|---|---|
+| `ejercicioId` del buscador simple | Solo 2026. Probados a mano los valores 10..25 |
+| Busqueda Avanzada + checkbox "historicos" | 2023-2025 da cero por fecha de publicacion, adjudicacion y creacion. Control 2020-2026: 100 filas, todas 2026 |
+| Registro OCP (data.open-contracting.org) | Nicaragua no publica OCDS. Ausente de los 134 datasets |
+| Portal nicaraguacompra.gob.ni | Solo normativa, guias y comunicados. No hay seccion de datos ni descargas |
+| "Monitoreo y Evaluacion" del portal | Texto introductorio sobre compras publicas. Sin datasets ni reportes descargables |
+| Internet Archive | Existe un snapshot de 2024-04-13, pero del *home* del portal. No se pudo descargar desde aqui para confirmar su contenido. En cualquier caso el Archive rastrea con GET y los listados de SISCAE son respuestas POST con estado de sesion, asi que en el mejor caso tendria la primera pagina de vigentes de ese dia, no un anio de adjudicaciones |
+| Datasets de terceros / investigacion | No se encontro ninguno |
+
+Si en algun momento se necesita 2023-2025 habra que pedirlo por gestion
 (solicitud de acceso a la informacion a la DGCE, o un volcado directo). No es
 un limite del conector, ni algo que se resuelva cambiando de fuente.
+
+### Consecuencia operativa: lo que no se capture, se pierde
+
+SISCAE solo expone el ejercicio en curso. Cuando cambie el anio, los ~3,800
+procesos de 2026 dejaran de ser consultables por el portal igual que hoy no
+lo son los de 2025 -- y no existiran en ninguna otra parte, porque Nicaragua
+no publica OCDS ni volcados.
+
+Eso invierte la prioridad de este conector: no es una carga que se pueda
+posponer. Cada corrida es el unico registro que va a quedar de ese periodo.
+Conviene correrlo con regularidad (y no solo una vez) para que MIRA acumule
+el historico que la fuente no guarda.
 - `buyer_tax_id`, `buyer_id_source`, `supplier_type`, `category_normalised`,
   `estimated_amount`: no expuestos por la fuente en ningun punto revisado.
 - `award_date`: SISCAE no publica fecha de adjudicacion propia. "Ultima
