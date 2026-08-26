@@ -1,15 +1,16 @@
 # Resolucion de entidades: proveedores y compradores
 
-`mart.procurement_supplier_details` y `mart.procurement_buyer_details` son
-relaciones 1-a-1 con cada proceso (`process_id` como llave primaria). Solo
-guardan `supplier_id` o `buyer_id`; no repiten nombre, identificador fiscal ni
-identificador fuente.
+`mart.process_buyers` relaciona procesos con compradores.
+`mart.award_suppliers` relaciona adjudicaciones con proveedores.
+Sus llaves compuestas permiten múltiples entidades sin repetir nombre,
+identificador fiscal ni identificador fuente.
 
 `sql/001_init.sql` incluye dos tablas de dimension
-(`mart.suppliers`, `mart.buyers`) con un ID propio, y una columna
-`supplier_id` / `buyer_id` en las tablas de detalle que las referencia.
-El nombre existe una sola vez en `name_normalised`. La grafia original queda
-en RAW y staging para auditoria.
+(`mart.suppliers`, `mart.buyers`) con un ID propio. Las tablas de detalle
+referencian esos IDs; puede haber varios compradores por proceso y varios
+proveedores por adjudicacion.
+El nombre existe una sola vez en `name_normalised`. Conserva la grafia
+publicada; solo se normaliza la representacion Unicode y se colapsan espacios.
 
 ## Estrategia de match: tres niveles, en orden de confianza
 
@@ -25,19 +26,19 @@ fila de dimension:
    comprador en su catalogo (`supplier_id_source` / `buyer_id_source`), sin
    ser necesariamente un identificador fiscal. Se usa solo si no hay
    identificador fiscal disponible.
-3. **`NAME_EXACT_NORMALISED`** -- nombre normalizado (mayusculas, sin
-   acentos/puntuacion, sin sufijos legales comunes como "S.A.", "C.A.",
-   "SOCIEDAD ANONIMA" -- ver `src/mira_etl/matching.py`). Solo se usa si no
-   hay ninguno de los dos anteriores.
+3. **`NAME_EXACT_NORMALISED`** -- nombre con Unicode canonico y espacios
+   normalizados. Conserva mayusculas, acentos, puntuacion y sufijos legales.
+   Solo se usa si no hay ninguno de los dos identificadores anteriores.
 El orden anterior se usa durante la carga, pero no se guarda como una columna:
 la tabla final conserva solamente los datos necesarios para identificar y
 relacionar la entidad.
 
 ## Riesgo aceptado explicitamente
 
-La normalizacion de nombre captura variantes de formato (mayusculas, acentos,
-puntuacion, sufijos legales), pero **no** captura:
+La normalizacion de nombre solo captura diferencias de representacion Unicode
+y espacios. Por lo tanto, **no** captura:
 
+- Diferencias de mayusculas, acentos, puntuacion o sufijos legales.
 - Abreviaturas ("Const." vs "Constructora").
 - Errores de tipeo.
 - Orden de palabras distinto.
@@ -52,8 +53,9 @@ adivinar en silencio, documentar la limitacion.
 ## Cuando queda `NULL`
 
 Si un registro no trae ni tax_id, ni source_id, ni nombre de proveedor/
-comprador, no se crea ninguna fila de dimension y la columna queda `NULL` --
-no se genera una fila "vacia" solo para tener algo que enlazar.
+comprador, no se crea ninguna fila de dimension. Para compradores, la
+referencia queda `NULL`; para proveedores, no se crea una fila en la tabla de
+relacion -- no se genera una entidad "vacia" solo para tener algo que enlazar.
 
 ## Concurrencia
 
@@ -77,7 +79,7 @@ Supabase real, por restricciones de red del entorno de desarrollo):
   mismo `supplier_id` que ya existia por `TAX_ID`.
 - Un proveedor sin ningun identificador en comun con los anteriores recibe un
   `supplier_id` nuevo, propio.
-- Un registro sin tax_id, source_id, ni nombre deja `supplier_id` en `NULL`,
-  sin crear ninguna fila.
+- Un registro sin tax_id, source_id, ni nombre no crea una relacion de
+  proveedor ni una fila de dimension.
 - Volver a correr el mismo lote de registros no duplica filas de dimension
   (idempotente).

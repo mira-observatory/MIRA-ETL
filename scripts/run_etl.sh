@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-    echo "Usage: $0 <source> <YYYYMM> [limit] [local_zip]" >&2
+    echo "Usage: $0 <source> <YYYYMM|YYYYMM-YYYYMM> [limit] [local_zip]" >&2
     echo "       $0 nicaragua_siscae [limit]" >&2
     echo "Sources: guatemala_guatecompras, costa_rica_sicop, nicaragua_siscae" >&2
 }
@@ -34,8 +34,12 @@ if [[ "$source_name" == "nicaragua_siscae" ]]; then
     limit="$period"
     period=""
 else
-    if [[ ! "$period" =~ ^[0-9]{6}$ ]]; then
-        echo "Period must use YYYYMM format." >&2
+    if [[ ! "$period" =~ ^[0-9]{6}([[:space:]]*-[[:space:]]*[0-9]{6})?$ ]]; then
+        echo "Period must use YYYYMM or YYYYMM-YYYYMM format." >&2
+        exit 2
+    fi
+    if [[ "$period" == *-* && -n "$local_zip" ]]; then
+        echo "A local ZIP cannot be used with a period range." >&2
         exit 2
     fi
 fi

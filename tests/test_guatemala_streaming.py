@@ -72,6 +72,7 @@ class JsonStreamingTest(unittest.TestCase):
             files={"required": [], "optional": []},
             csv={"encoding": "utf-8"},
             processing={"batch_size": 2, "record_limit": 3},
+            transform={"adapter": "ocds", "id_prefix": "MIRA-GT-"},
         )
         payload = {
             "records": [ocds_record(index) for index in range(5)],

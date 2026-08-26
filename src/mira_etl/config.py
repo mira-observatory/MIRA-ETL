@@ -19,13 +19,14 @@ class SourceConfig:
     files: dict[str, list[str]] = field(default_factory=lambda: {"required": [], "optional": []})
     csv: dict[str, Any] = field(default_factory=dict)
     processing: dict[str, Any] = field(default_factory=dict)
+    transform: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def load(cls, config_dir: Path, source: str) -> "SourceConfig":
         path = config_dir / f"{source}.json"
         if not path.is_file():
             raise FileNotFoundError(f"Source configuration not found: {path}")
-        with path.open("r", encoding="utf-8") as fh:
+        with path.open("r", encoding="utf-8-sig") as fh:
             payload = json.load(fh)
         config = cls(**payload)
         if config.source != source:
@@ -45,6 +46,15 @@ class SourceConfig:
     def delimiter_for(self, filename: str) -> str:
         delimiters = self.csv.get("delimiters", {})
         return delimiters.get(filename, self.csv.get("default_delimiter", ";"))
+
+    @property
+    def transform_adapter(self) -> str:
+        adapter = self.transform.get("adapter")
+        if not adapter:
+            raise ValueError(
+                f"Source '{self.source}' must define transform.adapter"
+            )
+        return str(adapter)
 
     def source_url_for_period(
         self,
@@ -77,7 +87,7 @@ class SourceConfig:
         load_dotenv()
         env_value = (
             os.environ.get("MIRA_JSON_BATCH_SIZE")
-            if self.download.get("type") == "http_zip_json"
+            if self.download.get("type") in {"http_zip_json", "http_jsonl_gz"}
             else None
         ) or os.environ.get("MIRA_ETL_BATCH_SIZE")
         value = int(env_value or self.processing.get("batch_size", 250))

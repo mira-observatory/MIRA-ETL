@@ -2,6 +2,9 @@ create schema if not exists raw;
 create schema if not exists staging;
 create schema if not exists mart;
 create schema if not exists audit;
+create schema if not exists query;
+create schema if not exists analytics;
+create schema if not exists web;
 
 create table if not exists audit.etl_runs (
     id bigserial primary key,
@@ -14,13 +17,6 @@ create table if not exists audit.etl_runs (
     finished_at timestamptz,
     error_message text
 );
-
-alter table audit.etl_runs add column if not exists pipeline_name text;
-alter table audit.etl_runs add column if not exists source text;
-alter table audit.etl_runs add column if not exists period text;
-alter table audit.etl_runs add column if not exists connector_version text;
-alter table audit.etl_runs add column if not exists finished_at timestamptz;
-alter table audit.etl_runs add column if not exists error_message text;
 
 create table if not exists audit.etl_row_counts (
     row_count_id bigserial primary key,
@@ -74,14 +70,23 @@ create table if not exists staging.normalized_candidates (
     created_at timestamptz not null default now()
 );
 
-create index if not exists idx_raw_source_rows_payload_gin
-    on raw.source_rows using gin (payload);
-
-create index if not exists idx_staging_candidates_payload_gin
-    on staging.normalized_candidates using gin (payload);
-
-create table if not exists mart.procurement_record_core (
+create table if not exists mart.processes (
     process_id text primary key,
+    process_number text,
+    title text,
+    description text,
+    procurement_method text,
+    process_status text check (
+        process_status is null or process_status in (
+            'PLANNED', 'PUBLISHED', 'OPEN', 'EVALUATION', 'AWARDED',
+            'CONTRACTED', 'COMPLETED', 'CANCELLED', 'DESERTED', 'SUSPENDED'
+        )
+    ),
+    source_status text,
+    publication_date timestamptz,
+    closing_date timestamptz,
+    estimated_amount numeric,
+    currency_code text,
     country_code text not null,
     source_system text not null,
     source_record_id text not null,
@@ -103,40 +108,15 @@ create table if not exists mart.procurement_record_core (
     unique (source_system, source_record_id, raw_payload_hash)
 );
 
-create table if not exists mart.procurement_process_details (
-    process_id text primary key references mart.procurement_record_core(process_id),
-    process_number text,
-    title text,
-    description text,
-    procurement_method text,
-    process_status text check (
-        process_status is null or process_status in (
-            'PLANNED', 'PUBLISHED', 'OPEN', 'EVALUATION', 'AWARDED',
-            'CONTRACTED', 'COMPLETED', 'CANCELLED', 'DESERTED', 'SUSPENDED'
-        )
-    ),
-    source_status text,
-    publication_date timestamptz,
-    closing_date timestamptz,
-    award_date timestamptz,
-    estimated_amount numeric,
-    awarded_amount numeric,
-    currency_code text
-);
-
-create table if not exists mart.procurement_buyer_details (
-    process_id text primary key references mart.procurement_record_core(process_id)
-);
-
-create table if not exists mart.procurement_supplier_details (
-    process_id text primary key references mart.procurement_record_core(process_id)
-);
-
-create table if not exists mart.procurement_item_details (
-    process_id text primary key references mart.procurement_record_core(process_id),
+create table if not exists mart.items (
+    item_id text primary key,
+    process_id text not null references mart.processes(process_id),
+    source_item_id text,
+    line_number text,
     item_description text,
     category_source text,
-    category_normalised text
+    category_normalised text,
+    unique (process_id, source_item_id, line_number)
 );
 
 create table if not exists audit.validation_results (
@@ -156,15 +136,6 @@ create table if not exists audit.validation_results (
     created_at timestamptz not null default now()
 );
 
-create index if not exists idx_mart_record_core_source_record
-    on mart.procurement_record_core (source_system, source_record_id);
-
-create index if not exists idx_mart_process_details_process_number
-    on mart.procurement_process_details (process_number);
-
-create index if not exists idx_audit_validation_results_run
-    on audit.validation_results (run_id, severity, rule_code);
-
 -- Dimension tables resolve the same supplier or buyer across procurement
 -- processes to one stable entity. See docs/entity_matching.md.
 
@@ -183,18 +154,6 @@ create table if not exists mart.suppliers (
     )
 );
 
-create index if not exists idx_suppliers_country_tax_id
-    on mart.suppliers (country_code, supplier_tax_id)
-    where supplier_tax_id is not null;
-
-create index if not exists idx_suppliers_country_source_id
-    on mart.suppliers (country_code, source_system, supplier_id_source)
-    where supplier_id_source is not null;
-
-create index if not exists idx_suppliers_country_name_normalised
-    on mart.suppliers (country_code, name_normalised)
-    where name_normalised is not null;
-
 create table if not exists mart.buyers (
     buyer_id bigserial primary key,
     country_code text not null,
@@ -204,50 +163,148 @@ create table if not exists mart.buyers (
     name_normalised text
 );
 
-create index if not exists idx_buyers_country_tax_id
-    on mart.buyers (country_code, buyer_tax_id)
-    where buyer_tax_id is not null;
+-- A procurement process can be related to multiple buyers.
+create table if not exists mart.process_buyers (
+    process_id text not null references mart.processes(process_id),
+    buyer_id bigint not null references mart.buyers(buyer_id),
+    primary key (process_id, buyer_id)
+);
 
-create index if not exists idx_buyers_country_source_id
-    on mart.buyers (country_code, source_system, buyer_id_source)
-    where buyer_id_source is not null;
+-- Awards carry amounts once; suppliers and items attach through bridge tables
+-- so multi-supplier or multi-item awards do not duplicate monetary values.
+create table if not exists mart.awards (
+    award_id text primary key,
+    process_id text not null references mart.processes(process_id),
+    source_award_id text,
+    award_date timestamptz,
+    awarded_amount numeric,
+    currency_code text
+);
 
-create index if not exists idx_buyers_country_name_normalised
-    on mart.buyers (country_code, name_normalised)
-    where name_normalised is not null;
+create table if not exists mart.award_items (
+    award_id text not null references mart.awards(award_id),
+    item_id text not null references mart.items(item_id),
+    primary key (award_id, item_id)
+);
 
-alter table mart.procurement_supplier_details
-    add column if not exists supplier_id bigint references mart.suppliers(supplier_id);
+create table if not exists mart.award_suppliers (
+    award_id text not null references mart.awards(award_id),
+    supplier_id bigint not null references mart.suppliers(supplier_id),
+    primary key (award_id, supplier_id)
+);
 
-alter table mart.procurement_buyer_details
-    add column if not exists buyer_id bigint references mart.buyers(buyer_id);
+-- Exact, source-grain summary consumed by fixed public API endpoints. This is
+-- deliberately outside `query`: generated SQL has no access to the `web`
+-- schema. Countries are catalogued separately so the public UI can add planned
+-- coverage without shipping a frontend change. `flag_asset` is a public asset
+-- path such as /flags/gt.svg or an absolute CDN URL.
+create table if not exists web.countries (
+    country_code text primary key,
+    display_name text not null,
+    flag_asset text,
+    sort_order integer not null default 0
+);
 
--- Entity names live only in buyers/suppliers as name_normalised. Source values
--- remain available in raw and staging for auditability.
-drop view if exists mart.v_procurements_web;
-drop index if exists mart.idx_mart_supplier_details_tax_id;
-alter table mart.procurement_buyer_details
-    drop column if exists buyer_name,
-    drop column if exists buyer_id_source,
-    drop column if exists buyer_tax_id;
-alter table mart.procurement_supplier_details
-    drop column if exists supplier_name,
-    drop column if exists supplier_id_source,
-    drop column if exists supplier_tax_id,
-    drop column if exists supplier_type;
-alter table mart.buyers drop column if exists buyer_name;
-alter table mart.suppliers drop column if exists supplier_name;
-alter table mart.buyers
-    drop column if exists match_method,
-    drop column if exists first_seen_at,
-    drop column if exists last_seen_at;
-alter table mart.suppliers
-    drop column if exists match_method,
-    drop column if exists first_seen_at,
-    drop column if exists last_seen_at;
+-- ACTIVE rows are upserted by the ETL after a connector has loaded data.
+-- Countries without ACTIVE sources are considered PLANNED by the API when they
+-- exist in web.countries.
+create table if not exists web.coverage_sources (
+    source_key text primary key,
+    country_code text not null,
+    source_system text not null,
+    display_name text not null,
+    status text not null check (status in ('ACTIVE', 'PLANNED', 'INACTIVE')),
+    process_count bigint not null default 0 check (process_count >= 0),
+    buyer_count bigint not null default 0 check (buyer_count >= 0),
+    supplier_count bigint not null default 0 check (supplier_count >= 0),
+    publication_date_min date,
+    publication_date_max date,
+    complete_process_count bigint not null default 0
+        check (complete_process_count >= 0),
+    partial_process_count bigint not null default 0
+        check (partial_process_count >= 0),
+    process_without_date_count bigint not null default 0
+        check (process_without_date_count >= 0),
+    last_successful_load_at timestamptz,
+    refreshed_at timestamptz,
+    sort_order integer not null default 0,
+    unique (country_code, source_system),
+    check (
+        publication_date_min is null
+        or publication_date_max is null
+        or publication_date_min <= publication_date_max
+    )
+);
 
-create index if not exists idx_supplier_details_supplier_id
-    on mart.procurement_supplier_details (supplier_id);
+-- Column-level documentation that MIRA-API injects into the SQL-generation
+-- prompt. The seed data lives in sql/003_seed_base_data.sql with the other
+-- baseline database data.
+create table if not exists query.semantic_dictionary (
+    id bigserial primary key,
+    view_name text not null,
+    column_name text not null,
+    description_es text not null,
+    data_type text not null,
+    enum_values text[],
+    unit text,
+    is_aggregable boolean not null default false,
+    caveat text,
+    unique (view_name, column_name)
+);
 
-create index if not exists idx_buyer_details_buyer_id
-    on mart.procurement_buyer_details (buyer_id);
+-- MIRA-API interaction log. One parent row holds the question and final/raw
+-- response; SQL generation retries are stored in query_attempt below.
+create table if not exists analytics.query_log (
+    id bigserial primary key,
+    created_at timestamptz not null default now(),
+    subject_key text not null,
+    question_text text not null,
+    response_text text,
+    model_response_raw jsonb,
+    outcome text not null check (outcome in (
+        'OK', 'OK_ZERO_ROWS', 'OK_DEGRADED_NARRATIVE',
+        'OUT_OF_SCOPE', 'REJECTED_ENTITY_NOT_FOUND', 'REJECTED_ENTITY_AMBIGUOUS',
+        'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
+        'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
+    )),
+    attempt_count int not null default 1,
+    total_latency_ms int,
+    prompt_version text,
+    app_version text,
+    model_used text
+);
+
+create table if not exists analytics.query_attempt (
+    id bigserial primary key,
+    query_log_id bigint not null references analytics.query_log(id),
+    attempt_number int not null,
+    generated_sql text,
+    outcome text not null check (outcome in (
+        'OK', 'OK_ZERO_ROWS', 'OK_DEGRADED_NARRATIVE',
+        'OUT_OF_SCOPE', 'REJECTED_ENTITY_NOT_FOUND', 'REJECTED_ENTITY_AMBIGUOUS',
+        'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
+        'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
+    )),
+    rejection_rule text,
+    rejection_detail text,
+    row_count int,
+    latency_ms int,
+    created_at timestamptz not null default now(),
+    unique (query_log_id, attempt_number)
+);
+
+-- Runtime quota state. Its primary key is the only index needed by the API's
+-- read/update path; analytics log tables intentionally have no extra indexes.
+create table if not exists analytics.quota_counters (
+    subject_key text not null,
+    period_type text not null check (period_type in ('DAY', 'MONTH')),
+    period_key text not null,
+    query_count int not null default 0,
+    spent_usd numeric not null default 0,
+    updated_at timestamptz not null default now(),
+    primary key (subject_key, period_type, period_key)
+);

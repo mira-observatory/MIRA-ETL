@@ -40,27 +40,31 @@ SCHEMA_CONTRACT: dict[str, set[str]] = {
         "candidate_id", "run_id", "source", "period", "source_record_id",
         "raw_payload_hash", "payload", "created_at",
     },
-    "mart.procurement_record_core": {
+    "mart.processes": {
         "process_id", "country_code", "source_system", "source_record_id",
         "source_url", "extracted_at", "source_last_modified_at",
         "connector_version", "raw_payload", "raw_payload_hash",
         "normalisation_status", "normalised_at", "data_quality_status",
-        "missing_fields",
-    },
-    "mart.procurement_process_details": {
-        "process_id", "process_number", "title", "description",
+        "missing_fields", "process_number", "title", "description",
         "procurement_method", "process_status", "source_status",
-        "publication_date", "closing_date", "award_date", "estimated_amount",
-        "awarded_amount", "currency_code",
+        "publication_date", "closing_date", "estimated_amount", "currency_code",
     },
-    "mart.procurement_buyer_details": {
+    "mart.process_buyers": {
         "process_id", "buyer_id",
     },
-    "mart.procurement_supplier_details": {
-        "process_id", "supplier_id",
+    "mart.items": {
+        "item_id", "process_id", "source_item_id", "line_number",
+        "item_description", "category_source", "category_normalised",
     },
-    "mart.procurement_item_details": {
-        "process_id", "item_description", "category_source", "category_normalised",
+    "mart.awards": {
+        "award_id", "process_id", "source_award_id", "award_date",
+        "awarded_amount", "currency_code",
+    },
+    "mart.award_items": {
+        "award_id", "item_id",
+    },
+    "mart.award_suppliers": {
+        "award_id", "supplier_id",
     },
     "mart.suppliers": {
         "supplier_id", "country_code", "source_system", "supplier_tax_id",
@@ -70,21 +74,39 @@ SCHEMA_CONTRACT: dict[str, set[str]] = {
         "buyer_id", "country_code", "source_system", "buyer_tax_id",
         "buyer_id_source", "name_normalised",
     },
+    "web.coverage_sources": {
+        "source_key", "country_code", "source_system", "display_name", "status",
+        "process_count", "buyer_count", "supplier_count", "publication_date_min",
+        "publication_date_max", "complete_process_count", "partial_process_count",
+        "process_without_date_count", "last_successful_load_at", "refreshed_at",
+        "sort_order",
+    },
+    "web.countries": {
+        "country_code", "display_name", "flag_asset", "sort_order",
+    },
+    "query.semantic_dictionary": {
+        "id", "view_name", "column_name", "description_es", "data_type",
+        "enum_values", "unit", "is_aggregable", "caveat",
+    },
 }
 
-
 CORE_SQL = """
-    insert into mart.procurement_record_core (
+    insert into mart.processes (
         process_id, country_code, source_system, source_record_id, source_url,
         extracted_at, source_last_modified_at, connector_version,
         raw_payload, raw_payload_hash, normalisation_status, normalised_at,
-        data_quality_status, missing_fields
+        data_quality_status, missing_fields, process_number, title, description,
+        procurement_method, process_status, source_status, publication_date,
+        closing_date, estimated_amount, currency_code
     )
     values (
         %(process_id)s, %(country_code)s, %(source_system)s, %(source_record_id)s, %(source_url)s,
         %(extracted_at)s, %(source_last_modified_at)s, %(connector_version)s,
         %(raw_payload)s::jsonb, %(raw_payload_hash)s, %(normalisation_status)s, %(normalised_at)s,
-        %(data_quality_status)s, %(missing_fields)s::jsonb
+        %(data_quality_status)s, %(missing_fields)s::jsonb, %(process_number)s,
+        %(title)s, %(description)s, %(procurement_method)s, %(process_status)s,
+        %(source_status)s, %(publication_date)s, %(closing_date)s,
+        %(estimated_amount)s, %(currency_code)s
     )
     on conflict (process_id)
     do update set
@@ -99,17 +121,7 @@ CORE_SQL = """
         normalisation_status = excluded.normalisation_status,
         normalised_at = excluded.normalised_at,
         data_quality_status = excluded.data_quality_status,
-        missing_fields = excluded.missing_fields
-"""
-
-PROCESS_DETAIL_SQL = """
-    insert into mart.procurement_process_details (
-        process_id, process_number, title, description, procurement_method,
-        process_status, source_status, publication_date, closing_date,
-        award_date, estimated_amount, awarded_amount, currency_code
-    )
-    values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    on conflict (process_id) do update set
+        missing_fields = excluded.missing_fields,
         process_number = excluded.process_number,
         title = excluded.title,
         description = excluded.description,
@@ -118,35 +130,56 @@ PROCESS_DETAIL_SQL = """
         source_status = excluded.source_status,
         publication_date = excluded.publication_date,
         closing_date = excluded.closing_date,
-        award_date = excluded.award_date,
         estimated_amount = excluded.estimated_amount,
+        currency_code = excluded.currency_code,
+        raw_payload_hash = excluded.raw_payload_hash
+"""
+
+PROCESS_BUYER_SQL = """
+    insert into mart.process_buyers (process_id, buyer_id)
+    values (%s, %s)
+    on conflict (process_id, buyer_id) do nothing
+"""
+
+ITEM_SQL = """
+    insert into mart.items (
+        item_id, process_id, source_item_id, line_number,
+        item_description, category_source, category_normalised
+    )
+    values (%s, %s, %s, %s, %s, %s, %s)
+    on conflict (item_id) do update set
+        process_id = excluded.process_id,
+        source_item_id = excluded.source_item_id,
+        line_number = excluded.line_number,
+        item_description = excluded.item_description,
+        category_source = excluded.category_source,
+        category_normalised = excluded.category_normalised
+"""
+
+AWARD_SQL = """
+    insert into mart.awards (
+        award_id, process_id, source_award_id,
+        award_date, awarded_amount, currency_code
+    )
+    values (%s, %s, %s, %s, %s, %s)
+    on conflict (award_id) do update set
+        process_id = excluded.process_id,
+        source_award_id = excluded.source_award_id,
+        award_date = excluded.award_date,
         awarded_amount = excluded.awarded_amount,
         currency_code = excluded.currency_code
 """
 
-BUYER_DETAIL_SQL = """
-    insert into mart.procurement_buyer_details (process_id, buyer_id)
+AWARD_ITEM_SQL = """
+    insert into mart.award_items (award_id, item_id)
     values (%s, %s)
-    on conflict (process_id) do update set
-        buyer_id = excluded.buyer_id
+    on conflict (award_id, item_id) do nothing
 """
 
-SUPPLIER_DETAIL_SQL = """
-    insert into mart.procurement_supplier_details (process_id, supplier_id)
+AWARD_SUPPLIER_SQL = """
+    insert into mart.award_suppliers (award_id, supplier_id)
     values (%s, %s)
-    on conflict (process_id) do update set
-        supplier_id = excluded.supplier_id
-"""
-
-ITEM_DETAIL_SQL = """
-    insert into mart.procurement_item_details (
-        process_id, item_description, category_source, category_normalised
-    )
-    values (%s, %s, %s, %s)
-    on conflict (process_id) do update set
-        item_description = excluded.item_description,
-        category_source = excluded.category_source,
-        category_normalised = excluded.category_normalised
+    on conflict (award_id, supplier_id) do nothing
 """
 
 
@@ -202,7 +235,9 @@ class Database:
                 """
                 select table_schema, table_name, column_name
                   from information_schema.columns
-                 where table_schema in ('raw', 'staging', 'mart', 'audit')
+                 where table_schema in (
+                    'raw', 'staging', 'mart', 'audit', 'web', 'query', 'analytics'
+                 )
                 """
             )
             rows = cur.fetchall()
@@ -249,6 +284,20 @@ class Database:
         assert row is not None
         return int(row["id"])
 
+    def has_successful_run(self, *, source: str, period: str) -> bool:
+        row = self.fetch_one(
+            """
+            select 1
+              from audit.etl_runs
+             where source = %s
+               and period = %s
+               and status = 'SUCCESS'
+             limit 1
+            """,
+            (source, period),
+        )
+        return row is not None
+
     def finish_run(self, run_id: int, status: str, error_message: str | None = None) -> None:
         self.execute(
             """
@@ -259,6 +308,97 @@ class Database:
              where id = %s
             """,
             (status, error_message, run_id),
+        )
+
+    def refresh_web_coverage_source(
+        self,
+        *,
+        source_key: str,
+        country_code: str,
+        source_system: str,
+        display_name: str,
+    ) -> None:
+        """Recompute the exact public summary for one successfully loaded source."""
+        self.execute(
+            """
+            with source_processes as (
+                select process_id, publication_date, data_quality_status
+                from mart.processes
+                where country_code = %s and source_system = %s
+            ),
+            process_stats as (
+                select
+                    count(*) as process_count,
+                    min(publication_date)::date as publication_date_min,
+                    max(publication_date)::date as publication_date_max,
+                    count(*) filter (
+                        where data_quality_status = 'COMPLETE'
+                    ) as complete_process_count,
+                    count(*) filter (
+                        where data_quality_status = 'PARTIAL'
+                    ) as partial_process_count,
+                    count(*) filter (
+                        where publication_date is null
+                    ) as process_without_date_count
+                from source_processes
+            ),
+            buyer_stats as (
+                select count(distinct pb.buyer_id) as buyer_count
+                from source_processes p
+                join mart.process_buyers pb on pb.process_id = p.process_id
+            ),
+            supplier_stats as (
+                select count(distinct aws.supplier_id) as supplier_count
+                from source_processes p
+                join mart.awards a on a.process_id = p.process_id
+                join mart.award_suppliers aws on aws.award_id = a.award_id
+            )
+            insert into web.coverage_sources (
+                source_key, country_code, source_system, display_name, status,
+                process_count, buyer_count, supplier_count,
+                publication_date_min, publication_date_max,
+                complete_process_count, partial_process_count,
+                process_without_date_count, last_successful_load_at, refreshed_at
+            )
+            select
+                %s, %s, %s, %s, 'ACTIVE',
+                ps.process_count,
+                bs.buyer_count,
+                ss.supplier_count,
+                ps.publication_date_min,
+                ps.publication_date_max,
+                ps.complete_process_count,
+                ps.partial_process_count,
+                ps.process_without_date_count,
+                (
+                    select max(r.finished_at)
+                    from audit.etl_runs r
+                    where r.source = %s and r.status = 'SUCCESS'
+                ),
+                now()
+            from process_stats ps
+            cross join buyer_stats bs
+            cross join supplier_stats ss
+            on conflict (source_key) do update set
+                country_code = excluded.country_code,
+                source_system = excluded.source_system,
+                display_name = excluded.display_name,
+                status = excluded.status,
+                process_count = excluded.process_count,
+                buyer_count = excluded.buyer_count,
+                supplier_count = excluded.supplier_count,
+                publication_date_min = excluded.publication_date_min,
+                publication_date_max = excluded.publication_date_max,
+                complete_process_count = excluded.complete_process_count,
+                partial_process_count = excluded.partial_process_count,
+                process_without_date_count = excluded.process_without_date_count,
+                last_successful_load_at = excluded.last_successful_load_at,
+                refreshed_at = excluded.refreshed_at
+            """,
+            (
+                country_code, source_system,
+                source_key, country_code, source_system, display_name, source_key,
+            ),
         )
 
     def finish_run_after_error(
@@ -697,53 +837,108 @@ class Database:
 
         self.upsert_record_core_batch(record_list)
 
-        buyer_ids = self.resolve_buyer_ids(record_list)
-        supplier_ids = self.resolve_supplier_ids(record_list)
+        buyer_records = [
+            buyer_record
+            for record in record_list
+            for buyer_record in buyer_records_for(record)
+        ]
+        buyer_ids = self.resolve_buyer_ids(buyer_records)
+        supplier_records = [
+            supplier_record
+            for record in record_list
+            for supplier_record in supplier_records_for(record)
+        ]
+        supplier_ids = self.resolve_supplier_ids(supplier_records)
 
-        process_rows = []
-        buyer_rows = []
-        supplier_rows = []
         item_rows = []
+        award_rows = []
 
-        for record, buyer_id, supplier_id in zip(
-            record_list, buyer_ids, supplier_ids, strict=True
-        ):
+        for record in record_list:
             process_id = record["process_id"]
-            process_rows.append(
-                (
-                    process_id,
-                    record.get("process_number"),
-                    record.get("title"),
-                    record.get("description"),
-                    record.get("procurement_method"),
-                    record.get("process_status"),
-                    record.get("source_status"),
-                    record.get("publication_date"),
-                    record.get("closing_date"),
-                    record.get("award_date"),
-                    record.get("estimated_amount"),
-                    record.get("awarded_amount"),
-                    record.get("currency_code"),
+            for item in record.get("items") or []:
+                item_rows.append(
+                    (
+                        item["item_id"],
+                        process_id,
+                        item.get("source_item_id"),
+                        item.get("line_number"),
+                        item.get("item_description"),
+                        item.get("category_source"),
+                        item.get("category_normalised"),
+                    )
                 )
-            )
 
-            buyer_rows.append((process_id, buyer_id))
-
-            supplier_rows.append((process_id, supplier_id))
-            item_rows.append(
-                (
-                    process_id,
-                    record.get("item_description"),
-                    record.get("category_source"),
-                    record.get("category_normalised"),
+            for award in record.get("awards") or []:
+                award_rows.append(
+                    (
+                        award["award_id"],
+                        process_id,
+                        award.get("source_award_id"),
+                        award.get("award_date"),
+                        award.get("awarded_amount"),
+                        award.get("currency_code"),
+                    )
                 )
-            )
 
         with self.conn.cursor() as cur:
-            cur.executemany(PROCESS_DETAIL_SQL, process_rows)
-            cur.executemany(BUYER_DETAIL_SQL, buyer_rows)
-            cur.executemany(SUPPLIER_DETAIL_SQL, supplier_rows)
-            cur.executemany(ITEM_DETAIL_SQL, item_rows)
+            cur.executemany(
+                "delete from mart.process_buyers where process_id = %s",
+                [(record["process_id"],) for record in record_list],
+            )
+            buyer_rows = [
+                (buyer_record["process_id"], buyer_id)
+                for buyer_record, buyer_id in zip(
+                    buyer_records, buyer_ids, strict=True
+                )
+                if buyer_id is not None
+            ]
+            if buyer_rows:
+                cur.executemany(PROCESS_BUYER_SQL, buyer_rows)
+            # Replace child rows and relationship sets so source corrections
+            # cannot leave stale items, awards, or suppliers behind.
+            cur.executemany(
+                """delete from mart.award_suppliers
+                    where award_id in (
+                        select award_id from mart.awards where process_id = %s
+                    )""",
+                [(record["process_id"],) for record in record_list],
+            )
+            cur.executemany(
+                """delete from mart.award_items
+                    where award_id in (
+                        select award_id from mart.awards where process_id = %s
+                    )""",
+                [(record["process_id"],) for record in record_list],
+            )
+            cur.executemany(
+                "delete from mart.awards where process_id = %s",
+                [(record["process_id"],) for record in record_list],
+            )
+            cur.executemany(
+                "delete from mart.items where process_id = %s",
+                [(record["process_id"],) for record in record_list],
+            )
+            if item_rows:
+                cur.executemany(ITEM_SQL, item_rows)
+            if award_rows:
+                cur.executemany(AWARD_SQL, award_rows)
+            award_item_rows = [
+                (award["award_id"], item_id)
+                for record in record_list
+                for award in record.get("awards") or []
+                for item_id in award.get("item_ids") or []
+            ]
+            if award_item_rows:
+                cur.executemany(AWARD_ITEM_SQL, award_item_rows)
+            award_supplier_rows = [
+                (supplier_record["award_id"], supplier_id)
+                for supplier_record, supplier_id in zip(
+                    supplier_records, supplier_ids, strict=True
+                )
+                if supplier_id is not None and supplier_record.get("award_id")
+            ]
+            if award_supplier_rows:
+                cur.executemany(AWARD_SUPPLIER_SQL, award_supplier_rows)
 
         return len(record_list)
 
@@ -783,7 +978,7 @@ class Database:
                 )
             rows = self.fetch_all("select * from mart.buyers")
             tax, source, name = entity_indexes(rows, "buyer")
-            return [
+            markers = [
                 first_entity_id(
                     record["country_code"], record["source_system"],
                     record.get("buyer_tax_id"), record.get("buyer_id_source"),
@@ -791,6 +986,7 @@ class Database:
                 )
                 for record in records
             ]
+
         return markers
 
     def resolve_supplier_ids(self, records: list[dict[str, Any]]) -> list[int | None]:
@@ -832,7 +1028,7 @@ class Database:
                 )
             rows = self.fetch_all("select * from mart.suppliers")
             tax, source, name = entity_indexes(rows, "supplier")
-            return [
+            markers = [
                 first_entity_id(
                     record["country_code"], record["source_system"],
                     record.get("supplier_tax_id"), record.get("supplier_id_source"),
@@ -840,6 +1036,7 @@ class Database:
                 )
                 for record in records
             ]
+
         return markers
 
     def upsert_record_core_batch(self, records: list[dict[str, Any]]) -> None:
@@ -859,6 +1056,79 @@ def ensure_sslmode(dsn: str) -> str:
         return dsn
     separator = "&" if "?" in dsn else "?"
     return f"{dsn}{separator}sslmode=require"
+
+
+def supplier_records_for(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expand award suppliers into entity-matching candidates.
+
+    Each returned row retains award_id so the resolved supplier can be linked
+    to the correct award without duplicating the award amount.
+    """
+    awards = record.get("awards")
+    if awards is not None:
+        expanded: list[dict[str, Any]] = []
+        for award in awards:
+            if not isinstance(award, dict):
+                continue
+            for supplier in award.get("suppliers") or []:
+                if not isinstance(supplier, dict):
+                    continue
+                candidate = {**record, **supplier, "award_id": award.get("award_id")}
+                if any(
+                    candidate.get(field)
+                    for field in ("supplier_tax_id", "supplier_id_source", "supplier_name")
+                ):
+                    expanded.append(candidate)
+        return expanded
+
+    suppliers = record.get("suppliers")
+    if suppliers is None:
+        if not any(
+            record.get(field)
+            for field in ("supplier_tax_id", "supplier_id_source", "supplier_name")
+        ):
+            return []
+        return [record]
+
+    expanded: list[dict[str, Any]] = []
+    for supplier in suppliers:
+        if not isinstance(supplier, dict):
+            continue
+        candidate = {**record, **supplier}
+        if any(
+            candidate.get(field)
+            for field in ("supplier_tax_id", "supplier_id_source", "supplier_name")
+        ):
+            expanded.append(candidate)
+    return expanded
+
+
+def buyer_records_for(record: dict[str, Any]) -> list[dict[str, Any]]:
+    """Expand a process into all buyer candidates linked to it.
+
+    The scalar buyer fields remain supported for connectors that expose only
+    one buyer. New or richer connectors can provide ``buyers`` as a list.
+    """
+    buyers = record.get("buyers")
+    if buyers is None:
+        if not any(
+            record.get(field)
+            for field in ("buyer_tax_id", "buyer_id_source", "buyer_name")
+        ):
+            return []
+        return [record]
+
+    expanded: list[dict[str, Any]] = []
+    for buyer in buyers:
+        if not isinstance(buyer, dict):
+            continue
+        candidate = {**record, **buyer}
+        if any(
+            candidate.get(field)
+            for field in ("buyer_tax_id", "buyer_id_source", "buyer_name")
+        ):
+            expanded.append(candidate)
+    return expanded
 
 
 def schema_mismatches(actual: dict[str, set[str]]) -> list[str]:

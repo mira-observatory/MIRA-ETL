@@ -3,6 +3,10 @@
   "country_code": "GT",
   "source_system": "Guatecompras OCDS",
   "connector_version": "gt-ocds-0.1.0",
+  "transform": {
+    "adapter": "ocds",
+    "id_prefix": "MIRA-GT-"
+  },
   "download": {
     "type": "http_zip_json",
     "bootstrap_url": "https://ocds.guatecompras.gt/",

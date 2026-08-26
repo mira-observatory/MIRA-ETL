@@ -123,6 +123,8 @@ def _records(source_rows: dict) -> list[dict]:
 
 
 def test_awarded_process_carries_supplier_and_amount() -> None:
+    """Nested items/awards/suppliers, same grain as Costa Rica
+    (relational_awards_csv): one record per process, with a list of awards."""
     row = dict(AWARDED_ROW)
     row["adjudicaciones"] = [
         {
@@ -137,15 +139,20 @@ def test_awarded_process_carries_supplier_and_amount() -> None:
     records = _records({"procesos_adjudicados": [row]})
 
     assert len(records) == 1
-    assert records[0]["awarded_amount"] == Decimal("7324833.36")
-    assert records[0]["currency_code"] == "NIO"
-    assert records[0]["supplier_tax_id"] == "0410401930001Y"
+    awards = records[0]["awards"]
+    assert len(awards) == 1
+    assert awards[0]["awarded_amount"] == Decimal("7324833.36")
+    assert awards[0]["currency_code"] == "NIO"
+    assert awards[0]["suppliers"][0]["supplier_tax_id"] == "0410401930001Y"
     assert records[0]["process_status"] == "AWARDED"
+    # Un item resumen por proceso: Nicaragua no desglosa lineas individuales.
+    assert len(records[0]["items"]) == 1
+    assert awards[0]["item_ids"] == [records[0]["items"][0]["item_id"]]
 
 
-def test_each_awarded_supplier_becomes_its_own_record() -> None:
-    """Same grain as Costa Rica. Collapsing two suppliers onto one row would
-    make the second award vanish."""
+def test_two_suppliers_on_the_same_process_both_load() -> None:
+    """Dos proveedores en el mismo proceso: dos entradas en `awards`, no dos
+    records. Colapsar en un solo award perderia la segunda adjudicacion."""
     row = dict(AWARDED_ROW)
     row["adjudicaciones"] = [
         {"proveedor": "EMPRESA A", "ruc": "J001", "moneda": "NIO", "monto": "100", "renglones": "1"},
@@ -154,10 +161,12 @@ def test_each_awarded_supplier_becomes_its_own_record() -> None:
 
     records = _records({"procesos_adjudicados": [row]})
 
-    assert len(records) == 2
-    assert {r["supplier_name"] for r in records} == {"EMPRESA A", "EMPRESA B"}
-    # Distinct ids, or the mart upsert would keep only the last one.
-    assert len({r["process_id"] for r in records}) == 2
+    assert len(records) == 1
+    awards = records[0]["awards"]
+    assert len(awards) == 2
+    assert {a["suppliers"][0]["supplier_name"] for a in awards} == {"EMPRESA A", "EMPRESA B"}
+    # award_id distintos, o el upsert de mart.awards pisaria el primero con el segundo.
+    assert len({a["award_id"] for a in awards}) == 2
 
 
 def test_awarded_process_without_published_detail_is_still_recorded() -> None:
@@ -172,8 +181,7 @@ def test_awarded_process_without_published_detail_is_still_recorded() -> None:
 
     assert len(records) == 1
     assert records[0]["process_status"] == "AWARDED"
-    assert records[0]["awarded_amount"] is None
-    assert records[0]["supplier_name"] is None
+    assert records[0]["awards"] == []
 
 
 def test_open_processes_keep_loading_alongside_awarded_ones() -> None:
@@ -233,7 +241,7 @@ def test_closed_processes_load_with_evaluation_status() -> None:
     assert records[0]["process_status"] == "EVALUATION"
     assert records[0]["source_status"] == "En Evaluación"
     # Bidding closed, award not decided: no counterparty to report yet.
-    assert records[0]["awarded_amount"] is None
+    assert records[0]["awards"] == []
 
 
 def test_all_three_datasets_load_together() -> None:

@@ -3,16 +3,34 @@
   "country_code": "NI",
   "source_system": "SISCAE Nicaragua",
   "connector_version": "ni-siscae-0.2.0",
+  "transform": {
+    "adapter": "nicaragua_siscae",
+    "id_prefix": "MIRA-NI-"
+  },
   "download": {
     "type": "html_session_scrape",
-    "base_url": "https://www.gestion.nicaraguacompra.gob.ni/siscae/portal/adquisiciones-gestion/busquedaProcedimientosVigentes?proc_estado=VIGENTE"
+    "base_url": "https://www.gestion.nicaraguacompra.gob.ni/siscae/portal/adquisiciones-gestion/busquedaProcedimientosVigentes?proc_estado=VIGENTE",
+    "webforms": {
+      "dataset_name": "procesos_vigentes",
+      "parser": "active_procedures",
+      "form_name_prefix": "resultadoView:listadoProcedimientosForm",
+      "portlet_prefix": "Pluto__adquisiciones_gestion_portlet_busquedaProcedimientosVigentesPortlet",
+      "page_size_field_suffix": "resultadosItems",
+      "page_size_value": "CIEN",
+      "link_hidden_field_suffix": "_link_hidden_",
+      "max_pages": 10,
+      "request_timeout_seconds": 45,
+      "max_request_retries": 3,
+      "retry_backoff_seconds": 5
+    }
   },
   "files": {
     "required": [
       "procesos_vigentes"
     ],
     "optional": [
-      "procesos_adjudicados"
+      "procesos_adjudicados",
+      "procesos_cerrados"
     ]
   },
   "csv": {}

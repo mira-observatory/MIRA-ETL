@@ -39,12 +39,6 @@ REQUIRED_FIELDS = {
     "procurement_method": "MISSING_PROCUREMENT_METHOD",
     "process_status": "MISSING_PROCESS_STATUS",
     "publication_date": "MISSING_PUBLICATION_DATE",
-    "award_date": "MISSING_AWARD_DATE",
-    "awarded_amount": "MISSING_AWARDED_AMOUNT",
-    "currency_code": "MISSING_CURRENCY_CODE",
-    "supplier_name": "MISSING_SUPPLIER_NAME",
-    "supplier_tax_id": "MISSING_SUPPLIER_TAX_ID",
-    "item_description": "MISSING_ITEM_DESCRIPTION",
 }
 
 
@@ -106,7 +100,7 @@ def validate_record(
                 )
             )
 
-    for field_name in ("estimated_amount", "awarded_amount"):
+    for field_name in ("estimated_amount",):
         value = record.get(field_name)
         if isinstance(value, Decimal) and value < 0:
             results.append(
@@ -123,7 +117,6 @@ def validate_record(
 
     publication_date = record.get("publication_date")
     closing_date = record.get("closing_date")
-    award_date = record.get("award_date")
 
     if publication_date and closing_date and closing_date < publication_date:
         results.append(
@@ -138,20 +131,7 @@ def validate_record(
             )
         )
 
-    if publication_date and award_date and award_date < publication_date:
-        results.append(
-            issue(
-                record,
-                rule_code="AWARD_BEFORE_PUBLICATION",
-                severity="ERROR",
-                field_name="award_date",
-                raw_value=raw_value_for(record, "award_date"),
-                normalised_value=award_date,
-                message="Award date is earlier than publication date.",
-            )
-        )
-
-    for field_name in ("publication_date", "closing_date", "award_date", "source_last_modified_at"):
+    for field_name in ("publication_date", "closing_date", "source_last_modified_at"):
         if raw_value_for(record, field_name) and record.get(field_name) is None:
             results.append(
                 issue(
@@ -179,7 +159,7 @@ def validate_record(
             )
         )
 
-    if (record.get("awarded_amount") is not None or record.get("estimated_amount") is not None) and not currency:
+    if record.get("estimated_amount") is not None and not currency:
         results.append(
             issue(
                 record,
@@ -206,19 +186,46 @@ def validate_record(
             )
         )
 
-    supplier_type = record.get("supplier_type")
-    if supplier_type and supplier_type not in VALID_SUPPLIER_TYPES:
-        results.append(
-            issue(
-                record,
-                rule_code="INVALID_SUPPLIER_TYPE",
-                severity="ERROR",
-                field_name="supplier_type",
-                raw_value=raw_value_for(record, "supplier_type"),
-                normalised_value=supplier_type,
-                message="Supplier type is outside the MIRA catalog.",
-            )
-        )
+    for award in record.get("awards") or []:
+        amount = award.get("awarded_amount")
+        award_currency = award.get("currency_code")
+        award_date = award.get("award_date")
+        if isinstance(amount, Decimal) and amount < 0:
+            results.append(issue(
+                record, rule_code="NEGATIVE_AWARDED_AMOUNT", severity="ERROR",
+                field_name="awarded_amount", raw_value=None,
+                normalised_value=amount, message="Award amount cannot be negative.",
+            ))
+        if publication_date and award_date and award_date < publication_date:
+            results.append(issue(
+                record, rule_code="AWARD_BEFORE_PUBLICATION", severity="ERROR",
+                field_name="award_date", raw_value=None,
+                normalised_value=award_date,
+                message="Award date is earlier than publication date.",
+            ))
+        if award_currency and str(award_currency).upper() not in VALID_CURRENCY_CODES:
+            results.append(issue(
+                record, rule_code="INVALID_CURRENCY_CODE", severity="WARNING",
+                field_name="currency_code", raw_value=None,
+                normalised_value=award_currency,
+                message="Award currency is outside the current MIRA catalog.",
+            ))
+        if amount is not None and not award_currency:
+            results.append(issue(
+                record, rule_code="MISSING_CURRENCY_WITH_AMOUNT", severity="ERROR",
+                field_name="currency_code", raw_value=None,
+                normalised_value=None,
+                message="An award amount exists but currency_code is missing.",
+            ))
+        for supplier in award.get("suppliers") or []:
+            supplier_type = supplier.get("supplier_type")
+            if supplier_type and supplier_type not in VALID_SUPPLIER_TYPES:
+                results.append(issue(
+                    record, rule_code="INVALID_SUPPLIER_TYPE", severity="ERROR",
+                    field_name="supplier_type", raw_value=None,
+                    normalised_value=supplier_type,
+                    message="Supplier type is outside the MIRA catalog.",
+                ))
 
     process_id = record.get("process_id")
     if process_id and process_id_counts[process_id] > 1:
@@ -279,7 +286,7 @@ def raw_value_for(record: dict[str, Any], field_name: str) -> object:
     payload = record.get("raw_payload") or {}
 
     if "proceso" in payload:  # nicaragua_siscae shape
-        proceso = payload.get("proceso") or {}
+        proceso = first_mapping(payload.get("proceso"))
         mapping = {
             "process_number": proceso.get("numero_proceso"),
             "title": proceso.get("descripcion"),
@@ -301,8 +308,9 @@ def raw_value_for(record: dict[str, Any], field_name: str) -> object:
         }
         return mapping.get(field_name)
 
-    adjudication = payload.get("procedimiento_adjudicacion") or {}
-    cartel = payload.get("detalle_cartel") or {}
+    adjudication = first_mapping(payload.get("procedimiento_adjudicacion"))
+    cartel = first_mapping(payload.get("detalle_cartel"))
+    supplier = first_mapping(payload.get("proveedor"))
 
     mapping = {
         "process_number": adjudication.get("NUMERO_PROCEDIMIENTO") or cartel.get("NRO_PROCEDIMIENTO"),
@@ -319,11 +327,19 @@ def raw_value_for(record: dict[str, Any], field_name: str) -> object:
         "currency_code": adjudication.get("MONEDA_ADJUDICADA"),
         "supplier_name": adjudication.get("NOMBRE_PROVEEDOR"),
         "supplier_tax_id": adjudication.get("CEDULA_PROVEEDOR"),
-        "supplier_type": (payload.get("proveedor") or {}).get("TIPO_PROVEEDOR"),
+        "supplier_type": supplier.get("TIPO_PROVEEDOR"),
         "item_description": adjudication.get("DESCR_BIEN_SERVICIO"),
         "source_last_modified_at": adjudication.get("fecha_rev"),
     }
     return mapping.get(field_name)
+
+
+def first_mapping(value: object) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        return next((item for item in value if isinstance(item, dict)), {})
+    return {}
 
 
 def is_blank(value: object) -> bool:

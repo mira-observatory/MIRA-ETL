@@ -3,6 +3,16 @@
   "country_code": "CR",
   "source_system": "SICOP Costa Rica",
   "connector_version": "cr-sicop-0.1.0",
+  "transform": {
+    "adapter": "relational_awards_csv",
+    "id_prefix": "MIRA-CR-",
+    "datasets": {
+      "processes": "DetalleCarteles.csv",
+      "awards": "ProcedimientoAdjudicacion.csv",
+      "buyers": "InstitucionesRegistradas.csv",
+      "suppliers": "Proveedores.csv"
+    }
+  },
   "download": {
     "type": "http_zip_csv",
     "url_template": "https://dlsaobservatorioprod.blob.core.windows.net/fs-synapse-observatorio-produccion/Zip/{period}.zip"

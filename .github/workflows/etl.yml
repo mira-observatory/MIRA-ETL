@@ -6,19 +6,50 @@ on:
       source:
         description: ETL source connector.
         required: true
+        type: choice
+        options:
+          - guatemala_guatecompras
+          - costa_rica_sicop
+          - honduras_oncae
+          - nicaragua_siscae
         default: costa_rica_sicop
       period:
-        description: Period in AAAAMM format.
-        required: true
+        description: Single YYYYMM period for Guatemala, Costa Rica, or Honduras.
+        required: false
+        type: string
+      start_period:
+        description: First YYYYMM period for a Guatemala, Costa Rica, or Honduras backfill.
+        required: false
+        type: string
+      end_period:
+        description: Last YYYYMM period for a Guatemala, Costa Rica, or Honduras backfill.
+        required: false
+        type: string
+      force_reprocess:
+        description: Run even if the source and period already succeeded.
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "20 7 3 * *"
+    - cron: "20 8 * * *"
 
 jobs:
-  run-etl:
+  monthly-etl:
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '20 7 3 * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.source != 'nicaragua_siscae')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        source: ${{ fromJSON(github.event_name == 'schedule' && '["guatemala_guatecompras","costa_rica_sicop","honduras_oncae"]' || format('["{0}"]', inputs.source)) }}
+    concurrency:
+      group: etl-${{ matrix.source }}
+      cancel-in-progress: false
     env:
       SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-      MIRA_CONNECTOR_VERSION: cr-sicop-0.1.0
+      FORCE_REPROCESS: ${{ github.event_name == 'workflow_dispatch' && inputs.force_reprocess || false }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,21 +57,46 @@ jobs:
       - name: Set period
         id: period
         shell: bash
+        env:
+          INPUT_PERIOD: ${{ inputs.period }}
+          INPUT_START_PERIOD: ${{ inputs.start_period }}
+          INPUT_END_PERIOD: ${{ inputs.end_period }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "value=${{ inputs.period }}" >> "$GITHUB_OUTPUT"
+            period="$INPUT_PERIOD"
+            start_period="$INPUT_START_PERIOD"
+            end_period="$INPUT_END_PERIOD"
+
+            validate_period() {
+              [[ "$1" =~ ^[0-9]{4}(0[1-9]|1[0-2])$ ]]
+            }
+
+            if [ -n "$period" ] && { [ -n "$start_period" ] || [ -n "$end_period" ]; }; then
+              echo "Use either period or start_period/end_period, not both." >&2
+              exit 2
+            fi
+            if [ -n "$period" ]; then
+              if ! validate_period "$period"; then
+                echo "period must be a valid YYYYMM value." >&2
+                exit 2
+              fi
+              echo "value=$period" >> "$GITHUB_OUTPUT"
+            elif [ -n "$start_period" ] && [ -n "$end_period" ]; then
+              if ! validate_period "$start_period" || ! validate_period "$end_period"; then
+                echo "start_period and end_period must be valid YYYYMM values." >&2
+                exit 2
+              fi
+              if [ "$start_period" -gt "$end_period" ]; then
+                echo "start_period must not be after end_period." >&2
+                exit 2
+              fi
+              echo "value=$start_period - $end_period" >> "$GITHUB_OUTPUT"
+            else
+              echo "Provide period, or provide both start_period and end_period." >&2
+              exit 2
+            fi
           else
             echo "value=$(date -u -d '1 month ago' +'%Y%m')" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set source
-        id: source
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "value=${{ inputs.source }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "value=costa_rica_sicop" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Setup Python
@@ -55,4 +111,57 @@ jobs:
         run: mira-etl init-db
 
       - name: Run ETL
-        run: mira-etl run --source "${{ steps.source.outputs.value }}" --period "${{ steps.period.outputs.value }}"
+        shell: bash
+        run: |
+          args=(run --source "${{ matrix.source }}" --period "${{ steps.period.outputs.value }}")
+          if [ "$FORCE_REPROCESS" = "true" ]; then
+            args+=(--force-reprocess)
+          fi
+          mira-etl "${args[@]}"
+
+  daily-nicaragua:
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '20 8 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs.source == 'nicaragua_siscae')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: etl-nicaragua_siscae
+      cancel-in-progress: false
+    env:
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      FORCE_REPROCESS: ${{ github.event_name == 'workflow_dispatch' && inputs.force_reprocess || false }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reject historical range inputs
+        if: github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          INPUT_START_PERIOD: ${{ inputs.start_period }}
+          INPUT_END_PERIOD: ${{ inputs.end_period }}
+        run: |
+          if [ -n "$INPUT_START_PERIOD" ] || [ -n "$INPUT_END_PERIOD" ]; then
+            echo "Nicaragua does not support period ranges." >&2
+            exit 2
+          fi
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Init database
+        run: mira-etl init-db
+
+      - name: Run Nicaragua ETL
+        shell: bash
+        run: |
+          args=(run --source nicaragua_siscae)
+          if [ "$FORCE_REPROCESS" = "true" ]; then
+            args+=(--force-reprocess)
+          fi
+          mira-etl "${args[@]}"

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import shutil
 import subprocess
 import zipfile
@@ -9,6 +10,9 @@ from pathlib import Path
 import httpx
 
 from mira_etl.config import SourceConfig
+
+ZIP_CONTENT_TYPES = ("application/zip", "application/octet-stream")
+GZIP_CONTENT_TYPES = ("application/gzip", "application/x-gzip", "application/octet-stream")
 
 
 def obtain_zip(
@@ -67,6 +71,7 @@ def obtain_zip(
             bootstrap_url=config.download.get(
                 "bootstrap_url"
             ),
+            content_types=ZIP_CONTENT_TYPES,
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code != 403:
@@ -94,12 +99,82 @@ def obtain_zip(
     return target
 
 
+def obtain_jsonl_gz(
+    config: SourceConfig,
+    period: str,
+    work_dir: Path,
+    local_file: Path | None,
+) -> Path:
+    """Download the gzipped JSON Lines file that holds the period's year.
+
+    The OCP Data Registry publishes Honduras one file per year, so the same
+    download serves the twelve periods of that year; the month filter is
+    applied later, while streaming (see pipeline.process_jsonl_records).
+    """
+    downloads_dir = work_dir / "downloads"
+    downloads_dir.mkdir(parents=True, exist_ok=True)
+
+    year = period[:4]
+    target = downloads_dir / f"{config.source}_{year}.jsonl.gz"
+
+    if local_file is not None:
+        if local_file.resolve() != target.resolve():
+            shutil.copyfile(local_file, target)
+        validate_gzip(target)
+        return target
+
+    url = config.source_url_for_period(period)
+
+    print(f"Downloading: {url}")
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 "
+            "(Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 "
+            "(KHTML, like Gecko) "
+            "Chrome/150.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/gzip,application/octet-stream,*/*",
+        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+    }
+
+    try:
+        download_with_httpx(
+            url=url,
+            target=target,
+            headers=headers,
+            bootstrap_url=config.download.get("bootstrap_url"),
+            content_types=GZIP_CONTENT_TYPES,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code != 403:
+            raise
+        print("Cloudflare rejected httpx with HTTP 403; retrying with curl.")
+        download_with_curl(url=url, target=target, headers=headers)
+
+    validate_gzip(target)
+
+    print(f"Downloaded JSONL.GZ: {target} ({target.stat().st_size} bytes)")
+
+    return target
+
+
+def validate_gzip(target: Path) -> None:
+    try:
+        with gzip.open(target, "rb") as fh:
+            fh.read(1)
+    except (OSError, EOFError) as exc:
+        raise ValueError(f"Downloaded file is not a valid GZIP: {target}") from exc
+
+
 def download_with_httpx(
     *,
     url: str,
     target: Path,
     headers: dict[str, str],
     bootstrap_url: str | None,
+    content_types: tuple[str, ...] = ZIP_CONTENT_TYPES,
 ) -> None:
     with httpx.Client(
         follow_redirects=True,
@@ -138,14 +213,13 @@ def download_with_httpx(
                 f"HTTP {response.status_code} "
                 f"| {content_type}"
             )
-            if (
-                "application/zip" not in content_type
-                and "application/octet-stream"
-                not in content_type
+            if not any(
+                accepted in content_type
+                for accepted in content_types
             ):
                 raise ValueError(
-                    "Expected ZIP from source, "
-                    f"but received: {content_type}"
+                    f"Expected {' or '.join(content_types)} "
+                    f"from source, but received: {content_type}"
                 )
             with target.open("wb") as fh:
                 for chunk in response.iter_bytes():
