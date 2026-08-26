@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -36,6 +37,13 @@ STATUS_MAP = {
     "desierto": "DESERTED",
     "suspendido": "SUSPENDED",
     "cerrado": "COMPLETED",
+    # The CERRADO checkbox in the portal's search returns rows whose displayed
+    # state is "En Evaluacion" -- bidding closed, award not decided yet. It is
+    # the single largest bucket in Nicaragua (~2,000 processes against ~1,300
+    # awarded), so leaving it unmapped would load all of them with a null
+    # status.
+    "en evaluacion": "EVALUATION",
+    "evaluacion": "EVALUATION",
 }
 
 
@@ -75,16 +83,19 @@ def build_records(
                 )
             )
 
-    for row in source_rows.get("procesos_vigentes", []):
-        records.append(
-            _build_record(
-                config=config,
-                connector_version=connector_version,
-                row=row,
-                extracted_at=extracted_at,
-                award=None,
+    # Open and closed-for-evaluation processes carry no supplier or amount by
+    # definition; their state travels in `estado` and normalise_status maps it.
+    for dataset in ("procesos_vigentes", "procesos_cerrados"):
+        for row in source_rows.get(dataset, []):
+            records.append(
+                _build_record(
+                    config=config,
+                    connector_version=connector_version,
+                    row=row,
+                    extracted_at=extracted_at,
+                    award=None,
+                )
             )
-        )
 
     return records
 
@@ -185,9 +196,18 @@ def build_source_record_id(row: dict[str, str | None]) -> str:
 
 
 def normalise_status(source_status: str | None) -> str | None:
+    """Map SISCAE's free-text state onto MIRA's catalog, accents and all.
+
+    The source writes "En Evaluacion" and "En Ejecucion" with their accents,
+    so a plain `.lower()` lookup misses both and silently yields a null
+    status -- for "En Evaluacion" that would have been ~2,000 processes, the
+    largest bucket Nicaragua has.
+    """
     if not source_status:
         return None
-    return STATUS_MAP.get(source_status.strip().lower())
+    plain = unicodedata.normalize("NFKD", source_status.strip().lower())
+    plain = "".join(ch for ch in plain if not unicodedata.combining(ch))
+    return STATUS_MAP.get(plain)
 
 
 def parse_datetime(value: str | None) -> datetime | None:

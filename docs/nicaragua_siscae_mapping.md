@@ -136,11 +136,16 @@ salen con el mismo formato que el listado de vigentes, asi que
 
 Medido contra el portal real el 2026-08-26:
 
-| | |
-|---|---|
-| Procesos ADJUDICADO obtenidos | 1,129 (1,129 unicos) |
-| Tiempo de la corrida completa | 465 s |
-| Filas con codificacion rota | 0 |
+| estado del portal | dataset | procesos | estado MIRA |
+|---|---|---|---|
+| Vigente | `procesos_vigentes` | ~500 | OPEN |
+| Adjudicado | `procesos_adjudicados` | ~1,300 | AWARDED |
+| En Evaluacion (checkbox CERRADO) | `procesos_cerrados` | ~2,000 | EVALUATION |
+| EJECUCION / DESIERTO / CANCELADO / SUSPENDIDO | -- | 0 | -- |
+
+Unos 3,800 procesos en total, contra los 630 que se cargaban antes. Medido:
+ADJUDICADO 1,129 de 1,129 unicos en 465 s; CERRADO 400 de 400 unicos en 327 s;
+cero filas con codificacion rota en ambos.
 
 Reparto por modalidad: 1,000 CONTRATACION MENOR, 77 LICITACION SELECTIVA,
 21 CONTRATACION SIMPLIFICADA, 18 LICITACION PUBLICA, 7 CONCURSO PARA
@@ -206,8 +211,28 @@ sostenida.
   `process_id` de Nicaragua**, con el costo de migracion que eso implica
   sobre datos ya cargados. Es una decision del dueno del modelo, no del
   conector.
-- **Historico anterior a 2026:** el selector "Ejercicio" del buscador solo
-  ofrece 2026 en este momento.
+## Alcance temporal: solo 2026 (verificado, 2026-08-26)
+
+**No hay historico disponible.** Se busco por tres caminos distintos y ninguno
+devuelve un solo proceso anterior a 2026:
+
+1. `ejercicioId` en el buscador simple. El desplegable solo ofrece 2026
+   (`value=21`), pero se probaron a mano todos los valores del 10 al 25:
+   unicamente el 21 devuelve filas. El barrido no estaba roto -- el 21
+   respondio dentro de la misma corrida.
+2. La **Busqueda Avanzada**, que si tiene rango de fechas
+   (`fechaDesdeId`/`fechaHastaId`), selector de que fecha filtrar
+   (creacion / publicacion / **adjudicacion** / cierre) y un checkbox
+   **`historicosId`**. Con historicos activado y rango 2023-2025: cero filas,
+   por fecha de publicacion, de adjudicacion y de creacion, repetido.
+3. La prueba de control que lo cierra: rango **2020-2026** con historicos
+   activado devuelve 100 filas, **todas de 2026**. La consulta funciona y el
+   rango incluye 2020-2025; el portal simplemente no publica nada de esos
+   anios.
+
+Si en algun momento se necesita 2023-2025 habra que pedirlo por otra via
+(solicitud de acceso a la informacion a la DGCE, o un volcado directo). No es
+un limite del conector.
 - `buyer_tax_id`, `buyer_id_source`, `supplier_type`, `category_normalised`,
   `estimated_amount`: no expuestos por la fuente en ningun punto revisado.
 - `award_date`: SISCAE no publica fecha de adjudicacion propia. "Ultima

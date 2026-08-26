@@ -31,6 +31,14 @@ SEARCH_PORTLET_PREFIX = "Pluto__adquisiciones_gestion_portlet_busquedaProcedimie
 #: Process states SISCAE accepts in the advanced search. A process is only
 #: awarded (supplier + amount published) once it leaves VIGENTE.
 STATE_AWARDED = "ADJUDICADO"
+#: The CERRADO checkbox returns processes whose displayed state is
+#: "En Evaluacion" -- bidding closed, award not decided. Measured 2026-08-26,
+#: it is the largest bucket Nicaragua has: ~2,000 processes against ~1,300
+#: awarded and ~500 open.
+STATE_CLOSED = "CERRADO"
+#: Checked on the live portal (2026-08-26): EJECUCION, DESIERTO, CANCELADO and
+#: SUSPENDIDO all return zero results, so they are not worth a request each.
+STATES_WITH_DATA = (STATE_AWARDED, STATE_CLOSED)
 #: What "CIEN" means in the results-per-page selector.
 ROWS_PER_PAGE = 100
 
@@ -515,10 +523,30 @@ def scrape_siscae(
 
     `limit` caps the number of records fetched -- intended for quick smoke tests
     against a real database without loading the full corpus.
+
+    Three datasets, because SISCAE splits the same corpus across three states
+    and the old connector could only see one of them (measured 2026-08-26):
+
+    | dataset               | estado del portal | procesos |
+    |-----------------------|-------------------|----------|
+    | procesos_vigentes     | Vigente           | ~500     |
+    | procesos_adjudicados  | Adjudicado        | ~1,300   |
+    | procesos_cerrados     | En Evaluacion     | ~2,000   |
+
+    Only the current fiscal year is reachable. The advanced search does offer
+    a date range and a "historicos" checkbox, but a 2020-2026 query with
+    historicos on returns 2026 rows and nothing else -- verified against
+    publication, award and creation dates alike. 2023-2025 is simply not
+    published here.
     """
     session = requests.Session()
     active_rows = fetch_active_procedures(session, limit=limit)
     awarded_rows = scrape_awarded_procedures(
         session, limit=limit, award_detail_limit=award_detail_limit
     )
-    return {"procesos_vigentes": active_rows, "procesos_adjudicados": awarded_rows}
+    closed_rows = search_procedures_by_state(session, STATE_CLOSED, limit=limit)
+    return {
+        "procesos_vigentes": active_rows,
+        "procesos_adjudicados": awarded_rows,
+        "procesos_cerrados": closed_rows,
+    }

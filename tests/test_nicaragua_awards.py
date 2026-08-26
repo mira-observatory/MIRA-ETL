@@ -195,3 +195,57 @@ def test_payload_hash_does_not_depend_on_how_much_detail_was_fetched() -> None:
 
     assert without["raw_payload_hash"] == with_empty["raw_payload_hash"]
     assert "adjudicaciones" not in without["raw_payload"]["proceso"]
+
+
+# --- normalise_status -------------------------------------------------------
+
+
+def test_accented_states_are_mapped_not_dropped() -> None:
+    """The source writes the accents. A plain .lower() lookup misses these two
+    and yields a null status -- for "En Evaluacion" that is ~2,000 processes,
+    the largest bucket Nicaragua has."""
+    from mira_etl.transform_ni import normalise_status
+
+    assert normalise_status("En Evaluación") == "EVALUATION"
+    assert normalise_status("En Ejecución") == "CONTRACTED"
+    assert normalise_status("Adjudicado") == "AWARDED"
+    assert normalise_status("Vigente") == "OPEN"
+
+
+def test_unknown_state_stays_null_rather_than_guessed() -> None:
+    from mira_etl.transform_ni import normalise_status
+
+    assert normalise_status("Estado Nuevo Que No Conocemos") is None
+    assert normalise_status(None) is None
+
+
+# --- procesos cerrados (En Evaluacion) --------------------------------------
+
+
+def test_closed_processes_load_with_evaluation_status() -> None:
+    """The CERRADO bucket is the largest Nicaragua has (~2,000 processes) and
+    the old connector never saw any of it."""
+    closed = dict(AWARDED_ROW, estado="En Evaluación", numero_proceso="5/2026")
+
+    records = _records({"procesos_cerrados": [closed]})
+
+    assert len(records) == 1
+    assert records[0]["process_status"] == "EVALUATION"
+    assert records[0]["source_status"] == "En Evaluación"
+    # Bidding closed, award not decided: no counterparty to report yet.
+    assert records[0]["awarded_amount"] is None
+
+
+def test_all_three_datasets_load_together() -> None:
+    records = _records(
+        {
+            "procesos_vigentes": [dict(AWARDED_ROW, estado="Vigente", numero_proceso="1/2026")],
+            "procesos_adjudicados": [dict(AWARDED_ROW, numero_proceso="2/2026")],
+            "procesos_cerrados": [
+                dict(AWARDED_ROW, estado="En Evaluación", numero_proceso="3/2026")
+            ],
+        }
+    )
+
+    assert {r["process_status"] for r in records} == {"OPEN", "AWARDED", "EVALUATION"}
+    assert len({r["process_id"] for r in records}) == 3
