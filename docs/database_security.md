@@ -52,7 +52,9 @@ El permiso de `mira_web` es intencionalmente explicito. No se otorga `select on
 all tables` ni se configuran privilegios por defecto en `web`: agregar una tabla
 nueva al esquema no debe volverla publica accidentalmente.
 
-Si los roles ya existen, omitir los dos `create role`.
+Si los roles ya existen, omitir los tres `create role`. Ejecutar los permisos
+como propietario de los objetos; los privilegios por defecto se aplican a
+las futuras tablas creadas por ese usuario.
 
 ## Contraseñas
 
@@ -68,7 +70,7 @@ alter role mira_web with password '<secreto-web>';
 MIRA-API utiliza conexiones separadas:
 
 ```text
-DATABASE_URL=postgresql://mira_query:...@host:5432/database?sslmode=require
+DATABASE_URL_QUERY=postgresql://mira_query:...@host:5432/database?sslmode=require
 DATABASE_URL_LOG=postgresql://mira_logger:...@host:5432/database?sslmode=require
 DATABASE_URL_WEB=postgresql://mira_web:...@host:5432/database?sslmode=require
 ```

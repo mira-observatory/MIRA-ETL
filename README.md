@@ -2,6 +2,11 @@
 
 ETL configurable para extraer, validar, transformar y cargar datos de contrataciones publicas al modelo minimo de MIRA.
 
+La preparacion y recuperacion de PostgreSQL estan en
+[la guia de base de datos](docs/database_recovery.md). Los roles y permisos
+se mantienen en [la documentacion existente](docs/database_security.md).
+El ETL todavia no esta desplegado ni programado en DigitalOcean.
+
 ## Conectores
 
 Costa Rica SICOP (descarga ZIP periodica):
