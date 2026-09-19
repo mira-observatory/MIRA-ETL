@@ -10,6 +10,7 @@ from psycopg.rows import dict_row
 
 from mira_etl.env import load_dotenv
 from mira_etl.matching import normalise_name
+from mira_etl.text_safety import postgres_safe
 
 
 # Contract between sql/001_init.sql and every table written by this class.
@@ -226,7 +227,7 @@ class Database:
 
     def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         with self.conn.cursor() as cur:
-            cur.execute(sql, params)
+            cur.execute(sql, postgres_safe(params))
 
     def validate_schema(self) -> None:
         """Fail before loading when PostgreSQL does not match our SQL contract."""
@@ -494,7 +495,7 @@ class Database:
                         source_file_id,
                         index,
                         json.dumps(
-                            row,
+                            postgres_safe(row),
                             ensure_ascii=False,
                             default=str,
                         ),
@@ -550,6 +551,7 @@ class Database:
 
         with self.conn.cursor() as cur:
             for record in records:
+                record = postgres_safe(record)
                 batch.append(
                     (
                         run_id,
@@ -608,6 +610,7 @@ class Database:
         total = 0
         with self.conn.cursor() as cur:
             for result in results:
+                result = postgres_safe(result)
                 batch.append(
                     (
                         run_id,
@@ -831,7 +834,7 @@ class Database:
         )
 
     def upsert_mart_split_records(self, records: Iterable[dict[str, Any]]) -> int:
-        record_list = list(records)
+        record_list = [postgres_safe(record) for record in records]
         if not record_list:
             return 0
 
@@ -1046,7 +1049,7 @@ class Database:
                 "raw_payload": json.dumps(record["raw_payload"], ensure_ascii=False, default=str),
                 "missing_fields": json.dumps(record["missing_fields"], ensure_ascii=False, default=str),
             }
-            for record in records
+            for record in map(postgres_safe, records)
         ]
         with self.conn.cursor() as cur:
             cur.executemany(CORE_SQL, rows)

@@ -244,3 +244,49 @@ Los timers quedaron habilitados el 18/09/2026, hora de Guatemala. Primera
 ejecucion diaria prevista: 19/09/2026 a las 02:20; mensual: 03/10/2026 a las
 01:20. Se verifico tambien que un trabajo manual espera el bloqueo y solo
 crea su worker despues de liberarse, sin ejecutar cargas concurrentes.
+
+## Correccion de rendimiento y caracteres de origen (19/09/2026)
+
+Imagen: `mira-etl:20260919-fix1`. Se agrego `idx_award_items_item` sobre
+`mart.award_items(item_id)` al SQL de inicializacion. El indice evita recorrer
+la tabla de relaciones completa al comprobar la clave foranea durante el
+reemplazo de articulos. En una BD existente se aplica como propietario, fuera
+de una transaccion, para permitir que continuen las escrituras:
+
+```sql
+create index concurrently if not exists idx_award_items_item
+    on mart.award_items (item_id);
+```
+
+Verificar que el indice este valido; `IF NOT EXISTS` no repara uno invalido ni
+garantiza que su definicion coincida. No volver a ejecutar todos los SQL de
+inicializacion para aplicar este cambio puntual.
+
+El ETL reemplaza el caracter NUL real (U+0000) por U+FFFD (`�`) en los valores
+guardados en columnas de texto y JSONB. No modifica la secuencia literal de
+seis caracteres `\u0000`, ni altera el archivo descargado o el hash original.
+Los registros afectados generan una advertencia `SOURCE_NUL_CHARACTER`, con
+las rutas afectadas y el JSON original serializado como texto en
+`audit.validation_results.payload.original_payload_json`. Ese texto permite
+recuperar el original mediante `json.loads`; no es una eliminacion silenciosa
+del caracter ni de la contratacion. En RAW/STAGING/MART se guarda la representacion
+compatible con PostgreSQL; el hash sigue identificando el contenido original.
+
+Si reemplazar caracteres haria colisionar dos claves distintas de un objeto JSON,
+la carga falla expresamente en lugar de descartar una de las claves.
+
+Pasaron 81 pruebas, incluida una carga y su reprocesamiento contra PostgreSQL 18
+efimero, sin acceso a produccion. La prueba confirma que texto/JSONB se guardan,
+que la evidencia original puede recuperarse y que el indice existe y es valido.
+
+Tras actualizar se relanzaron los rangos solicitados: Guatemala `202401-202609`
+y Honduras `202201-202609`, sin forzar los periodos ya completados. Un periodo
+incompleto vuelve a comenzar; no se reanuda desde la ultima fila. El cambio de
+imagen no modifica los horarios ni los limites documentados arriba.
+
+Validacion en produccion: auditoria 101, Guatemala `202412`, termino `SUCCESS`
+con 14,045 registros RAW/STAGING en 4 minutos y 18 segundos (tiempo de auditoria).
+El intento anterior, auditoria 98, habia terminado con error tras casi 39 minutos.
+Se verifico el uso del indice con `EXPLAIN` y se recupero el NUL original desde
+la evidencia de `SOURCE_NUL_CHARACTER`. Esta comprobacion valida ese periodo;
+los rangos historicos restantes continuan su ejecucion por separado.

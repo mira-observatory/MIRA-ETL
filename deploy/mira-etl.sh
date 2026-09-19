@@ -12,9 +12,9 @@ usage() {
 [[ $# -gt 0 ]] || { usage; exit 2; }
 action="$1"; shift
 case "$action" in
-    sources) exec "${compose[@]}" run --rm -T etl sources ;;
-    history) exec "${compose[@]}" run --rm -T etl history --limit "${1:-20}" ;;
-    check) exec "${compose[@]}" run --rm -T etl check-db ;;
+    sources) exec "${compose[@]}" run --rm -T etl sources </dev/null ;;
+    history) exec "${compose[@]}" run --rm -T etl history --limit "${1:-20}" </dev/null ;;
+    check) exec "${compose[@]}" run --rm -T etl check-db </dev/null ;;
     status)
         systemctl list-timers --all 'mira-etl*' --no-pager
         systemctl list-units --all 'mira-etl*' --no-pager
@@ -83,7 +83,7 @@ run_source() {
         echo "Inicio intento $attempt: $*"
         timeout --signal=TERM --kill-after=60s 6h \
             "${compose[@]}" run --rm --name mira-etl-worker -T etl run "$@" \
-            --work-dir "/work/${run_dir##*/}" &
+            --work-dir "/work/${run_dir##*/}" </dev/null &
         child=$!
         if wait "$child"; then
             echo 'Carga terminada correctamente.'

@@ -11,7 +11,7 @@ docker compose version
 docker compose --env-file .env config --quiet
 install -d -m 0750 -o 10001 -g 10001 data/work
 docker compose --env-file .env build
-docker compose --env-file .env run --rm -T etl check-db
+docker compose --env-file .env run --rm -T etl check-db </dev/null
 chmod 755 deploy/mira-etl.sh
 install -m 0644 deploy/mira-etl@.service deploy/mira-etl-monthly.timer deploy/mira-etl-daily.timer /etc/systemd/system/
 ln -sfn /opt/mira-etl/deploy/mira-etl.sh /usr/local/bin/mira-etl

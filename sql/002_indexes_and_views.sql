@@ -48,6 +48,11 @@ create index if not exists idx_awards_award_date
 create index if not exists idx_award_suppliers_supplier
     on mart.award_suppliers (supplier_id);
 
+-- FK checks when replacing mart.items must find references by item_id.
+-- The (award_id, item_id) primary key does not serve this lookup efficiently.
+create index if not exists idx_award_items_item
+    on mart.award_items (item_id);
+
 create index if not exists idx_process_buyers_buyer_id
     on mart.process_buyers (buyer_id);
 

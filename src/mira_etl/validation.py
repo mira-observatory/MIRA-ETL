@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from collections import Counter
+import json
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
+
+from mira_etl.text_safety import nul_paths
 
 
 VALID_PROCESS_STATUSES = {
@@ -85,6 +88,27 @@ def validate_record(
     process_id_counts: Counter[str | None],
 ) -> list[ValidationResult]:
     results: list[ValidationResult] = []
+
+    original = record.get("raw_payload") or {}
+    affected_paths = nul_paths(original)
+    if affected_paths:
+        results.append(ValidationResult(
+            source_record_id=record.get("source_record_id"),
+            raw_payload_hash=record.get("raw_payload_hash"),
+            rule_code="SOURCE_NUL_CHARACTER",
+            severity="WARNING",
+            field_name="raw_payload",
+            raw_value="\\u0000",
+            normalised_value="\ufffd",
+            message="Source NUL replaced with U+FFFD for PostgreSQL; original JSON preserved in audit.",
+            payload={
+                "process_id": record.get("process_id"),
+                "paths": affected_paths,
+                # Double serialization keeps the escape as text inside JSONB,
+                # allowing json.loads() to recover the original source value.
+                "original_payload_json": json.dumps(original, ensure_ascii=False, default=str),
+            },
+        ))
 
     for field_name, rule_code in REQUIRED_FIELDS.items():
         if is_blank(record.get(field_name)):
