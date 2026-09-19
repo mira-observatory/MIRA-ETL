@@ -1,0 +1,11 @@
+[Unit]
+Description=MIRA ETL - Nicaragua diario
+
+[Timer]
+# Igual al antiguo workflow: 08:20 UTC = 02:20 Guatemala.
+OnCalendar=*-*-* 08:20:00 UTC
+Persistent=true
+Unit=mira-etl@daily.service
+
+[Install]
+WantedBy=timers.target

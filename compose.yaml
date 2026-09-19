@@ -1,0 +1,27 @@
+name: mira-etl
+services:
+  etl:
+    image: mira-etl:${MIRA_ETL_IMAGE_TAG:-local}
+    build: .
+    init: true
+    restart: "no"
+    environment:
+      SUPABASE_DB_URL: ${SUPABASE_DB_URL:?Falta la conexion PostgreSQL del ETL}
+      MIRA_JSON_BATCH_SIZE: ${MIRA_JSON_BATCH_SIZE:-250}
+    volumes:
+      - ./data/work:/work
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 1.0
+    pids_limit: 128
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 45s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

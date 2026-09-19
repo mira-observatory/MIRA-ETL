@@ -1,0 +1,11 @@
+[Unit]
+Description=MIRA ETL - mes anterior, GT CR HN
+
+[Timer]
+# Igual al antiguo workflow: dia 3, 07:20 UTC = 01:20 Guatemala.
+OnCalendar=*-*-03 07:20:00 UTC
+Persistent=true
+Unit=mira-etl@monthly.service
+
+[Install]
+WantedBy=timers.target

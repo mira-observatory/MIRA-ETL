@@ -2,8 +2,8 @@
 
 MIRA-ETL mantiene la estructura (`sql/`) y la documentacion de roles. Esta guia
 cubre la base; no instala los servidores ni programa el ETL. Ver los despliegues de
-[MIRA-API](https://github.com/byronalb146/MIRA-API/blob/main/docs/digitalocean.md) y
-[MIRA-WEB](https://github.com/byronalb146/MIRA-WEB/blob/main/docs/operations-and-recovery.md).
+[MIRA-API](https://github.com/mira-observatory/MIRA-API/blob/main/docs/digitalocean.md) y
+[MIRA-WEB](https://github.com/mira-observatory/MIRA-WEB/blob/main/docs/operations-and-recovery.md).
 
 ## Ambiente actual
 
@@ -75,6 +75,6 @@ custodios. Guardar acceso administrativo/ETL, credenciales de API, identificador
 del cluster, ubicacion de backups y claves de cifrado si corresponden. No guardar
 contrasenas ni dumps de produccion en Git.
 
-Los SQL versionados recrean estructura/semillas. El ETL no esta desplegado ni
-programado: cron, n8n y disparadores manuales quedan por definir. Publicar estos
-cambios en Git es necesario para que el equipo disponga de la guia.
+Los SQL versionados recrean estructura/semillas. El ETL se ejecuta con Docker y
+timers de Ubuntu en el servidor de MIRA-API; ver [operacion](digitalocean.md).
+Publicar los cambios en Git es necesario para que el equipo disponga de las guias.

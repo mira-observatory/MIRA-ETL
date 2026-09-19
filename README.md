@@ -5,7 +5,9 @@ ETL configurable para extraer, validar, transformar y cargar datos de contrataci
 La preparacion y recuperacion de PostgreSQL estan en
 [la guia de base de datos](docs/database_recovery.md). Los roles y permisos
 se mantienen en [la documentacion existente](docs/database_security.md).
-El ETL todavia no esta desplegado ni programado en DigitalOcean.
+El ETL esta desplegado en el mismo Droplet que MIRA-API, con Docker y timers de
+Ubuntu. La [guia de operacion](docs/digitalocean.md) documenta cargas manuales,
+horarios, logs, errores y como reproducir la instalacion.
 
 ## Conectores
 
@@ -143,9 +145,8 @@ repite esa validación antes de insertar su primer registro.
 ## Flujo
 
 ```text
-n8n / manual
-  -> GitHub Actions workflow_dispatch
-  -> Python ETL
-  -> Supabase PostgreSQL
+Consola / systemd timers
+  -> Docker (Python ETL)
+  -> PostgreSQL administrado en DigitalOcean
      raw -> staging -> mart -> audit
 ```

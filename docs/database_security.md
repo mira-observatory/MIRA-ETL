@@ -99,3 +99,38 @@ select * from query.v_process;      -- debe fallar
 Con `mira_query`, `select * from web.coverage_sources` debe fallar. Esta
 comprobacion garantiza que el modelo y los endpoints publicos usan superficies
 de datos distintas.
+
+## Usuario de ejecucion del ETL
+
+El contenedor de produccion usa `mira_etl`, separado de los tres usuarios de API
+y del administrador. Preparar primero los esquemas con su propietario. Ejecutar
+este bloque como ese propietario una vez; si el rol existe, omitir `create role`.
+
+<!-- etl-role-sql -->
+```sql
+create role mira_etl with login noinherit nosuperuser nocreatedb nocreaterole;
+grant connect on database mira to mira_etl;
+grant usage on schema raw, staging, mart, audit, web, query to mira_etl;
+grant select, insert, update on all tables in schema raw, staging, mart, audit to mira_etl;
+grant delete on all tables in schema mart to mira_etl;
+grant usage, select on all sequences in schema raw, staging, mart, audit to mira_etl;
+alter default privileges in schema raw, staging, mart, audit
+    grant select, insert, update on tables to mira_etl;
+alter default privileges in schema mart grant delete on tables to mira_etl;
+alter default privileges in schema raw, staging, mart, audit
+    grant usage, select on sequences to mira_etl;
+grant select on web.countries, query.semantic_dictionary to mira_etl;
+grant select, insert, update on web.coverage_sources to mira_etl;
+grant execute on function query.f_unaccent(text) to mira_etl;
+```
+<!-- /etl-role-sql -->
+
+Asignar su contrasena con `\password mira_etl` en psql y guardar el DSN en la
+boveda y en `/opt/mira-etl/.env` del servidor, usando `SUPABASE_DB_URL`.
+No usar este usuario para `init-db`: no es propietario ni tiene permisos DDL.
+Los permisos DELETE en `mart` permiten reemplazar relaciones al reprocesar.
+No se le otorga acceso a `analytics`, que pertenece a la API.
+
+Verificar `mira-etl check` desde el servidor y una carga controlada; una lectura
+de `analytics.query_log` con `mira_etl` debe fallar. Para una base con otro nombre,
+ajustar el `grant connect` correspondiente.

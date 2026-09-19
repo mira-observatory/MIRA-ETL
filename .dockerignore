@@ -1,0 +1,12 @@
+**
+!Dockerfile
+!pyproject.toml
+!requirements-production.txt
+!src/
+!src/**
+!config/
+!config/**
+!sql/
+!sql/**
+**/__pycache__/
+**/*.pyc

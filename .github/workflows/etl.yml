@@ -30,9 +30,8 @@ on:
         required: false
         type: boolean
         default: false
-  schedule:
-    - cron: "20 7 3 * *"
-    - cron: "20 8 * * *"
+  # Horarios migrados a systemd en mira-app-prod; ver docs/digitalocean.md.
+  # Este workflow queda deshabilitado en GitHub como referencia del flujo anterior.
 
 jobs:
   monthly-etl:

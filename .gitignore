@@ -5,6 +5,7 @@
 .tmp_*/
 .tmp_*.txt
 .tools/
+.deploy-tmp/
 
 # Local secrets and environment
 .env

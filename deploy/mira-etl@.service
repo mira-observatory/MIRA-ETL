@@ -1,0 +1,16 @@
+[Unit]
+Description=MIRA ETL - %i
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/mira-etl
+ExecStart=/opt/mira-etl/deploy/mira-etl.sh _execute %i
+TimeoutStartSec=30h
+TimeoutStopSec=90s
+UMask=0077
+Nice=10
+StandardOutput=journal
+StandardError=journal

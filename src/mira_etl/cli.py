@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import signal
 from datetime import datetime
 from pathlib import Path
 
@@ -10,7 +11,13 @@ from mira_etl.db import Database
 from mira_etl.pipeline import run_pipeline
 
 
+def stop_requested(signum: int, _frame: object) -> None:
+    # Permite que run_pipeline registre ERROR al detener el contenedor con SIGTERM.
+    raise SystemExit(128 + signum)
+
+
 def main() -> None:
+    signal.signal(signal.SIGTERM, stop_requested)
     parser = argparse.ArgumentParser(prog="mira-etl")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -51,8 +58,39 @@ def main() -> None:
     )
 
     subparsers.add_parser("init-db", help="Create database schemas and tables.")
+    subparsers.add_parser("check-db", help="Validate connectivity and schema without modifying it.")
+    subparsers.add_parser("sources", help="List configured sources without connecting to the database.")
+    history = subparsers.add_parser("history", help="Show recent database audit records.")
+    history.add_argument("--limit", type=int, default=20)
 
     args = parser.parse_args()
+
+    if args.command == "sources":
+        for config in SourceConfig.discover(Path("config/sources")):
+            print(f"{config.source}\t{config.country_code}\t{config.download['type']}")
+        return
+
+    if args.command == "check-db":
+        with Database.from_env() as db:
+            db.validate_schema()
+            row = db.fetch_one("select current_database() as db, current_user as role", ())
+            print(f"Database schema OK: database={row['db']}, role={row['role']}")
+        return
+
+    if args.command == "history":
+        if not 1 <= args.limit <= 1000:
+            parser.error("--limit must be between 1 and 1000")
+        with Database.from_env() as db:
+            rows = db.fetch_all(
+                "select id, source, period, status, started_at, finished_at "
+                "from audit.etl_runs order by id desc limit %s", (args.limit,),
+            )
+        print("ID\tSOURCE\tPERIOD\tSTATUS\tSTARTED_AT\tFINISHED_AT")
+        for row in rows:
+            print("\t".join(str(row[key]) for key in (
+                "id", "source", "period", "status", "started_at", "finished_at",
+            )))
+        return
 
     if args.command == "init-db":
         with Database.from_env() as db:

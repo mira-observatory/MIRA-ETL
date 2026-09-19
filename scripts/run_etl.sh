@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
     echo "Usage: $0 <source> <YYYYMM|YYYYMM-YYYYMM> [limit] [local_zip]" >&2
     echo "       $0 nicaragua_siscae [limit]" >&2
-    echo "Sources: guatemala_guatecompras, costa_rica_sicop, nicaragua_siscae" >&2
+    echo "Sources: guatemala_guatecompras, costa_rica_sicop, honduras_oncae, nicaragua_siscae" >&2
 }
 
 if [[ $# -lt 1 || $# -gt 4 ]]; then
@@ -18,7 +18,7 @@ limit="${3:-}"
 local_zip="${4:-}"
 
 case "$source_name" in
-    guatemala_guatecompras|costa_rica_sicop|nicaragua_siscae) ;;
+    guatemala_guatecompras|costa_rica_sicop|honduras_oncae|nicaragua_siscae) ;;
     *) usage; exit 2 ;;
 esac
 
