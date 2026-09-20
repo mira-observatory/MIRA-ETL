@@ -290,3 +290,28 @@ El intento anterior, auditoria 98, habia terminado con error tras casi 39 minuto
 Se verifico el uso del indice con `EXPLAIN` y se recupero el NUL original desde
 la evidencia de `SOURCE_NUL_CHARACTER`. Esta comprobacion valida ese periodo;
 los rangos historicos restantes continuan su ejecucion por separado.
+
+## Indices del catalogo publico (19/09/2026)
+
+El catalogo de MIRA-API necesita estos indices de `mart.processes`, definidos
+en `sql/002_indexes_and_views.sql`:
+
+- `idx_processes_publication_page`: orden por fecha descendente, nulos al final
+  y desempate por `process_id`.
+- `idx_processes_status`: conteo y filtro por estado normalizado.
+- `idx_processes_number_trgm`, `idx_processes_title_trgm` y
+  `idx_processes_description_trgm`: busquedas literales con `ILIKE` en los tres
+  campos. Usan la extension `pg_trgm`, ya incluida en la inicializacion.
+
+En una base existente, ejecutar solo las cinco definiciones nuevas como
+propietario, cambiando `CREATE INDEX` por `CREATE INDEX CONCURRENTLY`, fuera
+de una transaccion. Verificar `pg_index.indisvalid` y la definicion de cada
+indice antes de dar la instalacion por terminada. No recrear tablas ni roles.
+Estos indices se mantienen automaticamente con las siguientes cargas; no
+requieren reconstruccion despues de cada ETL. Ocupan espacio y agregan trabajo
+a las escrituras. Las busquedas muy cortas o que coinciden con gran parte del
+catalogo todavia pueden resultar costosas.
+
+El ajuste de consultas pertenece a MIRA-API (`db/procedures.py`): pagina y conteo
+separados dentro de una sentencia y agrupacion directa de estados. Ambas partes
+son necesarias; aumentar el timeout no fue la correccion aplicada.

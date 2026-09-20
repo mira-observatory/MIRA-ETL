@@ -4,6 +4,14 @@
 create index if not exists idx_processes_country
     on mart.processes (country_code);
 
+-- Public catalog: retrieve the requested page without sorting every process,
+-- and count normalized statuses using a narrow index.
+create index if not exists idx_processes_publication_page
+    on mart.processes (publication_date desc nulls last, process_id);
+
+create index if not exists idx_processes_status
+    on mart.processes (process_status);
+
 -- Fuzzy entity search (MIRA-API resolves a typed name to a supplier/buyer
 -- candidate list). name_normalised keeps the published casing/accents, so
 -- matching has to fold case and accents at query time -- it is never folded
@@ -20,6 +28,16 @@ create index if not exists idx_processes_country
 -- a WHERE/ORDER BY with this function by name does).
 create extension if not exists pg_trgm;
 create extension if not exists unaccent;
+
+-- The catalog searches each field independently with literal ILIKE substrings.
+create index if not exists idx_processes_number_trgm
+    on mart.processes using gin (process_number gin_trgm_ops);
+
+create index if not exists idx_processes_title_trgm
+    on mart.processes using gin (title gin_trgm_ops);
+
+create index if not exists idx_processes_description_trgm
+    on mart.processes using gin (description gin_trgm_ops);
 
 create or replace function query.f_unaccent(text)
 returns text
