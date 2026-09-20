@@ -1,5 +1,8 @@
 # Operar MIRA-ETL desde el servidor
 
+La actualizacion de imagenes desde `main`, secretos de Actions y rollback se
+explican en [GitHub Actions](github-actions.md). Los horarios siguen en systemd.
+
 El ETL esta instalado en **mira-app-prod**, el mismo Droplet que MIRA-API:
 `104.131.184.162`, directorio `/opt/mira-etl`. Entrar por SSH con una llave propia
 o por Web Console de DigitalOcean. Los ejemplos asumen usuario `root`; con otro
