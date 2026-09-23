@@ -2,6 +2,13 @@
 
 ## Pipeline automatico de GitHub Actions
 
+Las pruebas usan `pytest`, que tambien descubre las clases `unittest` existentes.
+Para ejecutarlas localmente, instalar las dependencias en el entorno virtual con
+`pip install -c requirements-production.txt -e '.[test]'` y ejecutar `python -m pytest tests -q`
+o `scripts/run_tests.sh` / `scripts/run_tests.ps1`. La prueba de integracion
+requiere `MIRA_TEST_DB_URL` apuntando a una base desechable terminada en `_test`;
+no usar la base de produccion.
+
 El workflow `.github/workflows/ci.yml` verifica cada pull request y cada push a
 `main`. Solo `main` publica una imagen en `ghcr.io/mira-observatory/mira-etl`,
 con etiqueta `sha-COMMIT`; el servidor descarga el digest exacto generado.
