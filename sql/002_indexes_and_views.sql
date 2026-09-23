@@ -1,3 +1,20 @@
+-- Correlate API responses and errors; existing historical rows keep NULL IDs.
+alter table analytics.query_log
+    add column if not exists query_id uuid,
+    add column if not exists error_stage text,
+    add column if not exists error_type text;
+do $$
+begin
+    if not exists (
+        select 1 from pg_constraint
+        where conrelid = 'analytics.query_log'::regclass
+          and conname = 'query_log_query_id_key'
+    ) then
+        alter table analytics.query_log
+            add constraint query_log_query_id_key unique (query_id);
+    end if;
+end $$;
+
 -- Refresh the constraint for existing databases as well as new installations.
 alter table analytics.query_log
     drop constraint if exists query_log_outcome_check,
@@ -7,7 +24,7 @@ alter table analytics.query_log
         'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
         'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
         'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
-        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR', 'FAILED_INTERNAL_ERROR',
         'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
     ));
 
@@ -20,13 +37,13 @@ alter table analytics.query_attempt
         'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
         'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
         'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
-        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR', 'FAILED_INTERNAL_ERROR',
         'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
     ));
 
 -- Indexes used by ETL relationship lookups and citizen-facing query shapes.
--- Analytics log tables deliberately have no secondary indexes; quota_counters
--- already has the primary-key index required by its runtime read/update path.
+-- Analytics uses constraint-backed indexes for identity/idempotency only;
+-- quota_counters uses its primary-key index for runtime reads and updates.
 create index if not exists idx_processes_country
     on mart.processes (country_code);
 
@@ -187,7 +204,8 @@ where s.process_id = a.process_id
   and a.award_status is null
   and s.award_status is not null;
 
--- Full source records, only for explicit requests about excluded states.
+-- Full source records, only for explicit requests about excluded source states.
+-- Eligibility is a procurement/source status, not ETL validation or load status.
 create or replace view query.v_awards_all as
 select
     a.award_id,
@@ -201,11 +219,12 @@ select
     p.data_quality_status,
     p.normalisation_status,
     coalesce(
-        p.process_status in ('AWARDED', 'CONTRACTED', 'COMPLETED')
-        and p.data_quality_status in ('COMPLETE', 'PARTIAL')
-        and p.normalisation_status = 'PROCESSED'
-        and (a.award_status is null or lower(btrim(a.award_status)) in ('active', 'complete'))
-        and (a.awarded_amount is null or a.awarded_amount >= 0),
+        coalesce(p.process_status not in ('CANCELLED', 'DESERTED', 'SUSPENDED'), true)
+        and (
+            lower(btrim(a.award_status)) in ('active', 'complete')
+            or (a.award_status is null
+                and p.process_status in ('AWARDED', 'CONTRACTED', 'COMPLETED'))
+        ),
         false
     ) as is_valid_award
 from mart.awards a

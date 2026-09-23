@@ -36,7 +36,7 @@ def db():
     sql = (ROOT / "sql/002_indexes_and_views.sql").read_text()
     for view in ("v_awards_all", "v_awards"):
         match = re.search(
-            rf"create or replace view query\.{view} as\n(.*?);", sql, re.S
+            rf"create or replace view query\.{view} as\n(.*?);", sql, re.DOTALL
         )
         assert match is not None
         select = (
@@ -72,9 +72,8 @@ def add_award(
     )
 
 
-def test_highest_award_is_valid_even_when_cancelled_or_invalid_amount_is_higher(db):
+def test_highest_award_is_valid_even_when_cancelled_amount_is_higher(db):
     add_award(db, "cancelled-process", 9000, process="CANCELLED")
-    add_award(db, "bad-data", 8000, quality="INVALID")
     add_award(db, "cancelled-award", 7000, status="cancelled", process_id="mixed")
     add_award(db, "valid", 100, process_id="mixed")
     row = db.execute("""
@@ -91,18 +90,12 @@ def test_highest_award_is_valid_even_when_cancelled_or_invalid_amount_is_higher(
     [
         {"process": "DESERTED"},
         {"process": "SUSPENDED"},
-        {"process": "OPEN"},
-        {"process": None},
-        {"quality": "INVALID"},
-        {"quality": "DUPLICATE"},
-        {"quality": None},
-        {"normalisation": "ERROR"},
-        {"normalisation": "REVIEW_REQUIRED"},
+        {"process": "OPEN", "status": None},
+        {"process": None, "status": None},
         {"status": "pending"},
         {"status": "unsuccessful"},
         {"status": "cancelled"},
         {"status": "unknown-source-status"},
-        {"amount": -1},
     ],
 )
 def test_excluded_states_never_appear_by_default(db, overrides):
@@ -132,18 +125,17 @@ def test_explicit_cancelled_and_error_requests_keep_statuses_and_filter_before_l
 ):
     add_award(db, "cancelled-award", 900, status="cancelled")
     add_award(db, "cancelled-process", 800, process="CANCELLED")
-    add_award(db, "invalid", 950, quality="INVALID")
+    add_award(db, "unsuccessful", 950, status="unsuccessful")
     add_award(db, "valid", 100)
     cancelled = db.execute("""
         select award_id, award_status, process_status from v_awards_all
         where (award_status = 'cancelled' or process_status = 'CANCELLED')
-        and data_quality_status in ('COMPLETE', 'PARTIAL')
         order by awarded_amount desc limit 1
     """).fetchone()
     assert cancelled == ("cancelled-award", "cancelled", "AWARDED")
     assert db.execute(
-        "select award_id from v_awards_all where data_quality_status = 'INVALID'"
-    ).fetchone() == ("invalid",)
+        "select award_id from v_awards_all where award_status = 'unsuccessful'"
+    ).fetchone() == ("unsuccessful",)
 
 
 def test_ocds_preserves_individual_award_status_and_loader_writes_it():
@@ -189,3 +181,18 @@ def test_ocds_does_not_invent_status_when_source_omits_it():
         source_row={"ocid": "test", "awards": [{"id": "a"}]},
     )
     assert record["awards"][0]["award_status"] is None
+
+
+@pytest.mark.parametrize("quality,normalisation", [
+    ("INVALID", "ERROR"), ("PARTIAL", "REVIEW_REQUIRED"), ("COMPLETE", "PROCESSED"),
+])
+def test_etl_status_does_not_decide_if_award_is_active(db, quality, normalisation):
+    add_award(db, "active", 100, quality=quality, normalisation=normalisation)
+    add_award(db, "cancelled", 900, status="cancelled", quality=quality,
+              normalisation=normalisation)
+    assert db.execute("select award_id from v_awards").fetchall() == [("active",)]
+
+
+def test_explicit_active_award_status_works_without_completed_process(db):
+    add_award(db, "active", 100, process="OPEN", status="active")
+    assert db.execute("select award_id from v_awards").fetchone() == ("active",)

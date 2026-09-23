@@ -80,9 +80,9 @@ values
     ('query.v_awards', 'awarded_amount', 'Monto de esta adjudicacion en su moneda original. Es el monto correcto para preguntas sobre compras, gasto, montos adjudicados o rankings por valor.', 'numeric', null, 'currency_code', true, 'No sumar adjudicaciones con monedas diferentes sin convertirlas.'),
     ('query.v_awards', 'currency_code', 'Moneda del monto adjudicado.', 'text', null, null, false, null),
     ('query.v_awards', 'award_status', 'Estado individual publicado por la fuente. NULL si no lo publica; en ese caso se usa el estado del proceso para decidir validez.', 'text', null, null, false, 'Esta vista solo contiene adjudicaciones validas segun los estados disponibles; no prueba pago ni ejecucion.'),
-    ('query.v_awards', 'process_status', 'Estado del proceso: adjudicado, contratado o completado.', 'text', array['AWARDED','CONTRACTED','COMPLETED'], null, false, null),
-    ('query.v_awards', 'data_quality_status', 'Calidad del registro, sin errores de validacion.', 'text', array['COMPLETE','PARTIAL'], null, false, null),
-    ('query.v_awards', 'normalisation_status', 'Estado de normalizacion del registro.', 'text', array['PROCESSED'], null, false, null),
+    ('query.v_awards', 'process_status', 'Estado del procedimiento normalizado a partir de la fuente.', 'text', null, null, false, null),
+    ('query.v_awards', 'data_quality_status', 'Calidad tecnica del registro en el ETL; no determina el estado de la adjudicacion.', 'text', array['COMPLETE','PARTIAL','INVALID','DUPLICATE'], null, false, null),
+    ('query.v_awards', 'normalisation_status', 'Estado de normalizacion del ETL; no es el estado de la adjudicacion en la fuente.', 'text', null, null, false, null),
     ('query.v_awards', 'is_valid_award', 'Siempre verdadero en la vista por defecto. Para estados excluidos solicitados explicitamente usar query.v_awards_all.', 'boolean', null, null, false, null),
 
     ('query.v_award_items', 'award_id', 'Adjudicacion relacionada con el articulo.', 'text', null, null, false, null),
@@ -114,7 +114,7 @@ select 'query.v_awards_all', column_name, description_es, data_type,
        case when column_name in ('process_status', 'data_quality_status', 'normalisation_status')
             then null else enum_values end,
        unit, is_aggregable,
-       'SOLO para estados excluidos pedidos explicitamente: canceladas, pendientes, fallidas, errores o todos los estados. Mostrar los estados y nunca presentar estos montos como gasto ejecutado.'
+       'SOLO para estados excluidos pedidos explicitamente: canceladas, pendientes, fallidas en la fuente o todos los estados. Mostrar los estados y nunca presentar estos montos como gasto ejecutado.'
 from query.semantic_dictionary where view_name = 'query.v_awards'
 on conflict (view_name, column_name) do update set
     description_es = excluded.description_es,
@@ -129,6 +129,6 @@ set description_es = case column_name
     when 'is_valid_award' then 'Verdadero si cumple los criterios de la vista por defecto; falso para registros excluidos.'
     when 'process_status' then 'Estado del procedimiento, incluidos CANCELLED, DESERTED y SUSPENDED.'
     when 'data_quality_status' then 'Calidad del registro, incluidos INVALID y DUPLICATE.'
-    when 'normalisation_status' then 'Estado de normalizacion, incluidos ERROR y REVIEW_REQUIRED.'
+    when 'normalisation_status' then 'Estado tecnico de normalizacion del ETL; independiente del estado de la adjudicacion.'
     else description_es end
 where view_name = 'query.v_awards_all';

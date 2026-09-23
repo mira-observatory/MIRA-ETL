@@ -257,6 +257,9 @@ create table if not exists query.semantic_dictionary (
 -- response; SQL generation retries are stored in query_attempt below.
 create table if not exists analytics.query_log (
     id bigserial primary key,
+    query_id uuid unique,
+    error_stage text,
+    error_type text,
     created_at timestamptz not null default now(),
     subject_key text not null,
     question_text text not null,
@@ -268,7 +271,7 @@ create table if not exists analytics.query_log (
         'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
         'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
         'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
-        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR', 'FAILED_INTERNAL_ERROR',
         'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
     )),
     attempt_count int not null default 1,
@@ -289,7 +292,7 @@ create table if not exists analytics.query_attempt (
         'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
         'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
         'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
-        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR', 'FAILED_INTERNAL_ERROR',
         'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
     )),
     rejection_rule text,
