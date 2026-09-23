@@ -175,6 +175,11 @@ from mart.items;
 -- the available evidence. Never assign an invented "active" status.
 alter table mart.awards add column if not exists award_status text;
 
+-- A freshly added column has no statistics. Without them PostgreSQL can
+-- underestimate its NULL rows and reread/decompress the same process payload
+-- once per award. Refresh the estimate before the historical backfill.
+analyze mart.awards (award_status);
+
 -- Recover statuses for already loaded OCDS awards from their retained source
 -- payload, without downloading or rebuilding the procurement data. Some
 -- sources publish contracts without an awards section, as the adapter supports.
