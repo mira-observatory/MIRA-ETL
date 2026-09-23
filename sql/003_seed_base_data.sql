@@ -79,6 +79,11 @@ values
     ('query.v_awards', 'award_date', 'Fecha de la adjudicacion.', 'timestamptz', null, null, false, null),
     ('query.v_awards', 'awarded_amount', 'Monto de esta adjudicacion en su moneda original. Es el monto correcto para preguntas sobre compras, gasto, montos adjudicados o rankings por valor.', 'numeric', null, 'currency_code', true, 'No sumar adjudicaciones con monedas diferentes sin convertirlas.'),
     ('query.v_awards', 'currency_code', 'Moneda del monto adjudicado.', 'text', null, null, false, null),
+    ('query.v_awards', 'award_status', 'Estado individual publicado por la fuente. NULL si no lo publica; en ese caso se usa el estado del proceso para decidir validez.', 'text', null, null, false, 'Esta vista solo contiene adjudicaciones validas segun los estados disponibles; no prueba pago ni ejecucion.'),
+    ('query.v_awards', 'process_status', 'Estado del proceso: adjudicado, contratado o completado.', 'text', array['AWARDED','CONTRACTED','COMPLETED'], null, false, null),
+    ('query.v_awards', 'data_quality_status', 'Calidad del registro, sin errores de validacion.', 'text', array['COMPLETE','PARTIAL'], null, false, null),
+    ('query.v_awards', 'normalisation_status', 'Estado de normalizacion del registro.', 'text', array['PROCESSED'], null, false, null),
+    ('query.v_awards', 'is_valid_award', 'Siempre verdadero en la vista por defecto. Para estados excluidos solicitados explicitamente usar query.v_awards_all.', 'boolean', null, null, false, null),
 
     ('query.v_award_items', 'award_id', 'Adjudicacion relacionada con el articulo.', 'text', null, null, false, null),
     ('query.v_award_items', 'item_id', 'Articulo relacionado con la adjudicacion.', 'text', null, null, false, null),
@@ -99,3 +104,31 @@ on conflict (view_name, column_name) do update set
     unit = excluded.unit,
     is_aggregable = excluded.is_aggregable,
     caveat = excluded.caveat;
+
+
+-- The explicit-state view has the same columns; keep their descriptions in sync.
+insert into query.semantic_dictionary (
+    view_name, column_name, description_es, data_type, enum_values, unit, is_aggregable, caveat
+)
+select 'query.v_awards_all', column_name, description_es, data_type,
+       case when column_name in ('process_status', 'data_quality_status', 'normalisation_status')
+            then null else enum_values end,
+       unit, is_aggregable,
+       'SOLO para estados excluidos pedidos explicitamente: canceladas, pendientes, fallidas, errores o todos los estados. Mostrar los estados y nunca presentar estos montos como gasto ejecutado.'
+from query.semantic_dictionary where view_name = 'query.v_awards'
+on conflict (view_name, column_name) do update set
+    description_es = excluded.description_es,
+    data_type = excluded.data_type,
+    enum_values = excluded.enum_values,
+    unit = excluded.unit,
+    is_aggregable = excluded.is_aggregable,
+    caveat = excluded.caveat;
+
+update query.semantic_dictionary
+set description_es = case column_name
+    when 'is_valid_award' then 'Verdadero si cumple los criterios de la vista por defecto; falso para registros excluidos.'
+    when 'process_status' then 'Estado del procedimiento, incluidos CANCELLED, DESERTED y SUSPENDED.'
+    when 'data_quality_status' then 'Calidad del registro, incluidos INVALID y DUPLICATE.'
+    when 'normalisation_status' then 'Estado de normalizacion, incluidos ERROR y REVIEW_REQUIRED.'
+    else description_es end
+where view_name = 'query.v_awards_all';

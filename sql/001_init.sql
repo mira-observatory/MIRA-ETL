@@ -178,7 +178,8 @@ create table if not exists mart.awards (
     source_award_id text,
     award_date timestamptz,
     awarded_amount numeric,
-    currency_code text
+    currency_code text,
+    award_status text
 );
 
 create table if not exists mart.award_items (
@@ -261,7 +262,15 @@ create table if not exists analytics.query_log (
     question_text text not null,
     response_text text,
     model_response_raw jsonb,
-    outcome text not null,
+    outcome text not null check (outcome in (
+        'OK', 'OK_ZERO_ROWS', 'OK_DEGRADED_NARRATIVE',
+        'OUT_OF_SCOPE', 'REJECTED_ENTITY_NOT_FOUND', 'REJECTED_ENTITY_AMBIGUOUS',
+        'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
+        'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
+        'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
+    )),
     attempt_count int not null default 1,
     total_latency_ms int,
     prompt_version text,
@@ -269,10 +278,12 @@ create table if not exists analytics.query_log (
     model_used text
 );
 
--- Refresh the constraint for existing databases as well as new installations.
-alter table analytics.query_log
-    drop constraint if exists query_log_outcome_check,
-    add constraint query_log_outcome_check check (outcome in (
+create table if not exists analytics.query_attempt (
+    id bigserial primary key,
+    query_log_id bigint not null references analytics.query_log(id),
+    attempt_number int not null,
+    generated_sql text,
+    outcome text not null check (outcome in (
         'OK', 'OK_ZERO_ROWS', 'OK_DEGRADED_NARRATIVE',
         'OUT_OF_SCOPE', 'REJECTED_ENTITY_NOT_FOUND', 'REJECTED_ENTITY_AMBIGUOUS',
         'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
@@ -280,14 +291,7 @@ alter table analytics.query_log
         'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
         'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
         'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
-    ));
-
-create table if not exists analytics.query_attempt (
-    id bigserial primary key,
-    query_log_id bigint not null references analytics.query_log(id),
-    attempt_number int not null,
-    generated_sql text,
-    outcome text not null,
+    )),
     rejection_rule text,
     rejection_detail text,
     row_count int,
@@ -295,19 +299,6 @@ create table if not exists analytics.query_attempt (
     created_at timestamptz not null default now(),
     unique (query_log_id, attempt_number)
 );
-
--- Refresh the constraint for existing databases as well as new installations.
-alter table analytics.query_attempt
-    drop constraint if exists query_attempt_outcome_check,
-    add constraint query_attempt_outcome_check check (outcome in (
-        'OK', 'OK_ZERO_ROWS', 'OK_DEGRADED_NARRATIVE',
-        'OUT_OF_SCOPE', 'REJECTED_ENTITY_NOT_FOUND', 'REJECTED_ENTITY_AMBIGUOUS',
-        'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
-        'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
-        'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
-        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
-        'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
-    ));
 
 -- Runtime quota state. Its primary key is the only index needed by the API's
 -- read/update path; analytics log tables intentionally have no extra indexes.

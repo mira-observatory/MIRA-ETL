@@ -1,3 +1,29 @@
+-- Refresh the constraint for existing databases as well as new installations.
+alter table analytics.query_log
+    drop constraint if exists query_log_outcome_check,
+    add constraint query_log_outcome_check check (outcome in (
+        'OK', 'OK_ZERO_ROWS', 'OK_DEGRADED_NARRATIVE',
+        'OUT_OF_SCOPE', 'REJECTED_ENTITY_NOT_FOUND', 'REJECTED_ENTITY_AMBIGUOUS',
+        'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
+        'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
+        'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
+    ));
+
+-- Refresh the constraint for existing databases as well as new installations.
+alter table analytics.query_attempt
+    drop constraint if exists query_attempt_outcome_check,
+    add constraint query_attempt_outcome_check check (outcome in (
+        'OK', 'OK_ZERO_ROWS', 'OK_DEGRADED_NARRATIVE',
+        'OUT_OF_SCOPE', 'REJECTED_ENTITY_NOT_FOUND', 'REJECTED_ENTITY_AMBIGUOUS',
+        'REJECTED_QUESTION_TOO_BROAD', 'REJECTED_INTENT_UNCLEAR',
+        'REJECTED_SQL_PARSE', 'REJECTED_SQL_NOT_SELECT', 'REJECTED_SQL_RELATION',
+        'REJECTED_SQL_FUNCTION', 'REJECTED_SQL_COST', 'REJECTED_SQL_COUNTRY_SCOPE',
+        'FAILED_DB_TIMEOUT', 'FAILED_DB_ERROR', 'FAILED_LLM_ERROR',
+        'THROTTLED_QUOTA', 'THROTTLED_BUDGET'
+    ));
+
 -- Indexes used by ETL relationship lookups and citizen-facing query shapes.
 -- Analytics log tables deliberately have no secondary indexes; quota_counters
 -- already has the primary-key index required by its runtime read/update path.
@@ -127,15 +153,70 @@ select
     category_normalised
 from mart.items;
 
-create or replace view query.v_awards as
+-- Keep this upgrade in the existing schema/index/view files. Sources which
+-- do not publish an award status leave it NULL; the process status is then
+-- the available evidence. Never assign an invented "active" status.
+alter table mart.awards add column if not exists award_status text;
+
+-- Recover statuses for already loaded OCDS awards from their retained source
+-- payload, without downloading or rebuilding the procurement data. Some
+-- sources publish contracts without an awards section, as the adapter supports.
+with source_awards as (
+    select p.process_id, entry.value,
+           nullif(lower(btrim(entry.value->>'status')), '') as award_status
+    from mart.processes p
+    cross join lateral (
+        select coalesce(p.raw_payload->'compiledRelease', p.raw_payload) as release
+    ) source
+    cross join lateral jsonb_array_elements(
+        case
+            when jsonb_typeof(source.release->'awards') = 'array'
+                 and source.release->'awards' <> '[]'::jsonb
+                then source.release->'awards'
+            when jsonb_typeof(source.release->'contracts') = 'array'
+                then source.release->'contracts'
+            else '[]'::jsonb
+        end
+    ) entry
+)
+update mart.awards a
+set award_status = s.award_status
+from source_awards s
+where s.process_id = a.process_id
+  and coalesce(s.value->>'id', s.value->>'awardID') = a.source_award_id
+  and a.award_status is null
+  and s.award_status is not null;
+
+-- Full source records, only for explicit requests about excluded states.
+create or replace view query.v_awards_all as
 select
-    award_id,
-    process_id,
-    source_award_id,
-    award_date,
-    awarded_amount,
-    currency_code
-from mart.awards;
+    a.award_id,
+    a.process_id,
+    a.source_award_id,
+    a.award_date,
+    a.awarded_amount,
+    a.currency_code,
+    a.award_status,
+    p.process_status,
+    p.data_quality_status,
+    p.normalisation_status,
+    coalesce(
+        p.process_status in ('AWARDED', 'CONTRACTED', 'COMPLETED')
+        and p.data_quality_status in ('COMPLETE', 'PARTIAL')
+        and p.normalisation_status = 'PROCESSED'
+        and (a.award_status is null or lower(btrim(a.award_status)) in ('active', 'complete'))
+        and (a.awarded_amount is null or a.awarded_amount >= 0),
+        false
+    ) as is_valid_award
+from mart.awards a
+join mart.processes p on p.process_id = a.process_id;
+
+-- Filter BEFORE ORDER BY/LIMIT/COUNT: a cancelled highest amount must never
+-- win an ordinary ranking, even if generated SQL forgets the status filter.
+-- This represents valid awards according to the source, not proof of payment
+-- or completed execution of a contract.
+create or replace view query.v_awards as
+select * from query.v_awards_all where is_valid_award;
 
 create or replace view query.v_award_items as
 select award_id, item_id

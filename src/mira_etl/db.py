@@ -59,7 +59,7 @@ SCHEMA_CONTRACT: dict[str, set[str]] = {
     },
     "mart.awards": {
         "award_id", "process_id", "source_award_id", "award_date",
-        "awarded_amount", "currency_code",
+        "awarded_amount", "currency_code", "award_status",
     },
     "mart.award_items": {
         "award_id", "item_id",
@@ -160,15 +160,16 @@ ITEM_SQL = """
 AWARD_SQL = """
     insert into mart.awards (
         award_id, process_id, source_award_id,
-        award_date, awarded_amount, currency_code
+        award_date, awarded_amount, currency_code, award_status
     )
-    values (%s, %s, %s, %s, %s, %s)
+    values (%s, %s, %s, %s, %s, %s, %s)
     on conflict (award_id) do update set
         process_id = excluded.process_id,
         source_award_id = excluded.source_award_id,
         award_date = excluded.award_date,
         awarded_amount = excluded.awarded_amount,
-        currency_code = excluded.currency_code
+        currency_code = excluded.currency_code,
+        award_status = excluded.award_status
 """
 
 AWARD_ITEM_SQL = """
@@ -880,6 +881,7 @@ class Database:
                         award.get("award_date"),
                         award.get("awarded_amount"),
                         award.get("currency_code"),
+                        award.get("award_status"),
                     )
                 )
 

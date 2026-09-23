@@ -145,6 +145,9 @@ def build_record(
                 source_award_id or str(position), prefix=award_prefix,
             ),
             "source_award_id": source_award_id,
+            # Preserve each award's status: a cancelled award can coexist
+            # with an active award in the same procurement process.
+            "award_status": str(source_award.get("status") or "").strip().lower() or None,
             "item_ids": linked_item_ids,
             "award_date": parse_datetime(award_date),
             "awarded_amount": parse_decimal(value.get("amount")),
