@@ -1,3 +1,34 @@
+-- Extract historical source states once before taking the schema-change locks.
+-- Keep only matching keys and statuses, not whole JSON payloads. Statistics on
+-- this temporary result avoid a nested loop that repeatedly decodes a process
+-- payload for each award. The table disappears on commit or rollback.
+create temporary table mira_award_status_backfill on commit drop as
+select p.process_id,
+       coalesce(entry.value->>'id', entry.value->>'awardID') as source_award_id,
+       nullif(lower(btrim(entry.value->>'status')), '') as award_status
+from mart.processes p
+cross join lateral (
+    select coalesce(p.raw_payload->'compiledRelease', p.raw_payload) as release
+    offset 0
+) source
+cross join lateral (
+    select source.release->'awards' as awards,
+           source.release->'contracts' as contracts
+    offset 0
+) sections
+cross join lateral jsonb_array_elements(
+    case
+        when jsonb_typeof(sections.awards) = 'array'
+             and sections.awards <> '[]'::jsonb then sections.awards
+        when jsonb_typeof(sections.contracts) = 'array' then sections.contracts
+        else '[]'::jsonb
+    end
+) entry
+where coalesce(entry.value->>'id', entry.value->>'awardID') is not null
+  and nullif(lower(btrim(entry.value->>'status')), '') is not null;
+
+analyze pg_temp.mira_award_status_backfill;
+
 -- Correlate API responses and errors; existing historical rows keep NULL IDs.
 alter table analytics.query_log
     add column if not exists query_id uuid,
@@ -180,34 +211,16 @@ alter table mart.awards add column if not exists award_status text;
 -- once per award. Refresh the estimate before the historical backfill.
 analyze mart.awards (award_status);
 
--- Recover statuses for already loaded OCDS awards from their retained source
--- payload, without downloading or rebuilding the procurement data. Some
--- sources publish contracts without an awards section, as the adapter supports.
-with source_awards as (
-    select p.process_id, entry.value,
-           nullif(lower(btrim(entry.value->>'status')), '') as award_status
-    from mart.processes p
-    cross join lateral (
-        select coalesce(p.raw_payload->'compiledRelease', p.raw_payload) as release
-    ) source
-    cross join lateral jsonb_array_elements(
-        case
-            when jsonb_typeof(source.release->'awards') = 'array'
-                 and source.release->'awards' <> '[]'::jsonb
-                then source.release->'awards'
-            when jsonb_typeof(source.release->'contracts') = 'array'
-                then source.release->'contracts'
-            else '[]'::jsonb
-        end
-    ) entry
-)
+-- Recover only known statuses with matching source identifiers. Existing
+-- non-NULL statuses and records without source evidence remain unchanged.
 update mart.awards a
 set award_status = s.award_status
-from source_awards s
+from pg_temp.mira_award_status_backfill s
 where s.process_id = a.process_id
-  and coalesce(s.value->>'id', s.value->>'awardID') = a.source_award_id
-  and a.award_status is null
-  and s.award_status is not null;
+  and s.source_award_id = a.source_award_id
+  and a.award_status is null;
+
+analyze mart.awards (award_status);
 
 -- Full source records, only for explicit requests about excluded source states.
 -- Eligibility is a procurement/source status, not ETL validation or load status.

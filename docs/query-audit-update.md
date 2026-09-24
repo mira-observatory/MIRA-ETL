@@ -24,6 +24,12 @@ backfill de estados recorre los payloads guardados y puede tardar en una base
 grande. Los registros historicos de auditoria conservan sus datos; los campos
 nuevos `query_id`, `error_stage` y `error_type` quedan NULL para ese historial.
 
+El `002` extrae primero identificadores y estados a una tabla temporal de sesion,
+que desaparece al confirmar o revertir la transaccion. Analiza sus estadisticas
+antes de actualizar para evitar releer el JSON por cada adjudicacion. El usuario
+administrador necesita permiso TEMP. Ejecutar el archivo completo dentro de la
+transaccion indicada; no ejecutar sus sentencias sueltas con autocommit.
+
 Verificar los permisos segun [database_security.md](database_security.md).
 En particular, la nueva vista requiere SELECT para `mira_query`; si los
 privilegios por defecto no estaban configurados para el propietario que
