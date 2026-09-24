@@ -303,6 +303,18 @@ create table if not exists analytics.query_attempt (
     unique (query_log_id, attempt_number)
 );
 
+-- Supplier totals are an ETL snapshot, never a sum across currencies.
+create table if not exists mart.supplier_award_totals (
+    country_code text not null,
+    supplier_id bigint not null,
+    currency_code text not null,
+    total_awarded_amount numeric not null,
+    award_count bigint not null,
+    shared_award_count bigint not null,
+    refreshed_at timestamptz not null,
+    primary key (country_code, supplier_id, currency_code)
+);
+
 -- Runtime quota state. Its primary key is the only index needed by the API's
 -- read/update path; analytics log tables intentionally have no extra indexes.
 create table if not exists analytics.quota_counters (

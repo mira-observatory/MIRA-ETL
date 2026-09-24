@@ -318,3 +318,31 @@ catalogo todavia pueden resultar costosas.
 El ajuste de consultas pertenece a MIRA-API (`db/procedures.py`): pagina y conteo
 separados dentro de una sentencia y agrupacion directa de estados. Ambas partes
 son necesarias; aumentar el timeout no fue la correccion aplicada.
+
+## Rankings y acumulados por proveedor (24/09/2026)
+
+`idx_awards_amount_desc` permite buscar la mayor adjudicacion sin ordenar
+todo el historial. En bases existentes crear el indice de SQL 002 con
+`CREATE INDEX CONCURRENTLY`, fuera de una transaccion, y verificar `indisvalid`.
+
+Los acumulados viven en `mart.supplier_award_totals` (SQL 001), con el indice
+`idx_supplier_totals_ranking` y la vista `query.v_supplier_award_totals` (SQL 002).
+Aplicar esas definiciones y las entradas nuevas del diccionario (SQL 003)
+antes de desplegar API y ETL. Dar SELECT de la vista a `mira_query`, SELECT
+de `query.v_awards` a `mira_etl` y SELECT/INSERT/UPDATE/DELETE de la tabla
+de resumen a `mira_etl`, segun la guia de seguridad.
+
+Inicializar cada pais mediante `Database.refresh_supplier_award_totals`.
+El ETL repite esta operacion al completar cada carga, antes de marcarla exitosa.
+La sustitucion del resumen es transaccional y las actualizaciones de un mismo
+pais se serializan. Un fallo conserva el resumen anterior y falla la corrida
+para que se pueda reintentar. `refreshed_at` permite conocer su fecha de corte.
+
+Cada suma agrupa por pais, proveedor estable y moneda. La clave unica
+de `award_suppliers` impide repetir una adjudicacion dentro de un proveedor.
+Se excluyen montos/monedas desconocidos y se usa la elegibilidad de `v_awards`.
+Una adjudicacion compartida aporta el monto completo a cada proveedor asociado;
+`shared_award_count` permite aclarar que no existe desglose de participaciones.
+No sumar los totales de proveedores para inferir gasto publico: se duplicarian
+las adjudicaciones compartidas. El resumen cubre todo el historial cargado,
+sin desglose temporal ni conversion de moneda.

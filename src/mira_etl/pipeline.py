@@ -103,6 +103,7 @@ def run_pipeline(
                     records=records,
                 )
 
+            db.refresh_supplier_award_totals(country_code=config.country_code)
             db.finish_run(run_id, "SUCCESS")
             db.refresh_web_coverage_source(
                 source_key=config.source,

@@ -132,3 +132,19 @@ set description_es = case column_name
     when 'normalisation_status' then 'Estado tecnico de normalizacion del ETL; independiente del estado de la adjudicacion.'
     else description_es end
 where view_name = 'query.v_awards_all';
+
+insert into query.semantic_dictionary
+    (view_name, column_name, description_es, data_type, enum_values, unit, is_aggregable, caveat)
+values
+    ('query.v_supplier_award_totals', 'country_code', 'Pais donde se adjudicaron los contratos. Filtrar siempre.', 'text', null, null, false, null),
+    ('query.v_supplier_award_totals', 'supplier_id', 'Identificador estable del proveedor, usado para agrupar y desempatar.', 'bigint', null, null, false, null),
+    ('query.v_supplier_award_totals', 'name_normalised', 'Nombre oficial del proveedor.', 'text', null, null, false, null),
+    ('query.v_supplier_award_totals', 'currency_code', 'Moneda unica de este acumulado. Nunca comparar ni sumar acumulados de monedas diferentes.', 'text', null, null, false, null),
+    ('query.v_supplier_award_totals', 'total_awarded_amount', 'Monto acumulado de adjudicaciones validas asociadas al proveedor en esta moneda, para todo el historial cargado.', 'numeric', null, 'currency_code', false, 'Ya sumado, sin duplicar la pareja adjudicacion-proveedor. Excluye montos o monedas desconocidos. No volver a sumar, convertir ni unir con otras vistas. No tiene desglose temporal.'),
+    ('query.v_supplier_award_totals', 'award_count', 'Cantidad de adjudicaciones incluidas en este acumulado.', 'bigint', null, null, false, null),
+    ('query.v_supplier_award_totals', 'shared_award_count', 'Adjudicaciones incluidas que tienen varios proveedores. Su monto completo se asocia una vez a cada proveedor; no se conoce su reparto.', 'bigint', null, null, false, 'Si es mayor que cero, aclarar que el acumulado incluye adjudicaciones compartidas sin desglose individual.'),
+    ('query.v_supplier_award_totals', 'refreshed_at', 'Fecha de actualizacion del acumulado tras la carga del ETL.', 'timestamptz', null, null, false, null)
+on conflict (view_name, column_name) do update set
+    description_es = excluded.description_es, data_type = excluded.data_type,
+    enum_values = excluded.enum_values, unit = excluded.unit,
+    is_aggregable = excluded.is_aggregable, caveat = excluded.caveat;

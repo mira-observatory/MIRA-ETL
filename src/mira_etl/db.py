@@ -11,11 +11,16 @@ from psycopg.rows import dict_row
 from mira_etl.env import load_dotenv
 from mira_etl.matching import normalise_name
 from mira_etl.text_safety import postgres_safe
+from mira_etl.supplier_totals import SUPPLIER_TOTALS_SQL
 
 
 # Contract between sql/001_init.sql and every table written by this class.
 # Contracted tables must match exactly before an ETL run starts.
 SCHEMA_CONTRACT: dict[str, set[str]] = {
+    "mart.supplier_award_totals": {
+        "country_code", "supplier_id", "currency_code", "total_awarded_amount",
+        "award_count", "shared_award_count", "refreshed_at",
+    },
     "audit.etl_runs": {
         "id", "pipeline_name", "source", "period", "connector_version",
         "status", "started_at", "finished_at", "error_message",
@@ -311,6 +316,19 @@ class Database:
             """,
             (status, error_message, run_id),
         )
+
+    def refresh_supplier_award_totals(self, *, country_code: str) -> None:
+        """Readers see either the old snapshot or the complete new snapshot."""
+        with self.conn.transaction():
+            self.execute(
+                "select pg_advisory_xact_lock(hashtext(%s))",
+                (f"supplier-totals:{country_code}",),
+            )
+            self.execute(
+                "delete from mart.supplier_award_totals where country_code = %s",
+                (country_code,),
+            )
+            self.execute(SUPPLIER_TOTALS_SQL, (country_code,))
 
     def refresh_web_coverage_source(
         self,

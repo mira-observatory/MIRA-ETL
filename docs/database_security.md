@@ -120,6 +120,7 @@ alter default privileges in schema mart grant delete on tables to mira_etl;
 alter default privileges in schema raw, staging, mart, audit
     grant usage, select on sequences to mira_etl;
 grant select on web.countries, query.semantic_dictionary to mira_etl;
+grant select on query.v_awards to mira_etl;
 grant select, insert, update on web.coverage_sources to mira_etl;
 grant execute on function query.f_unaccent(text) to mira_etl;
 ```

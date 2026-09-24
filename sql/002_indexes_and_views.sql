@@ -137,6 +137,13 @@ create index if not exists idx_awards_process
 create index if not exists idx_awards_award_date
     on mart.awards (award_date);
 
+create index if not exists idx_awards_amount_desc
+    on mart.awards (awarded_amount desc nulls last);
+
+create index if not exists idx_supplier_totals_ranking
+    on mart.supplier_award_totals
+        (country_code, currency_code, total_awarded_amount desc, supplier_id);
+
 create index if not exists idx_award_suppliers_supplier
     on mart.award_suppliers (supplier_id);
 
@@ -262,6 +269,14 @@ from mart.award_items;
 create or replace view query.v_award_suppliers as
 select award_id, supplier_id
 from mart.award_suppliers;
+
+-- Complete loaded history, with one amount per supplier AND currency.
+-- Shared awards contribute once to each associated supplier, not a known share.
+create or replace view query.v_supplier_award_totals as
+select t.country_code, t.supplier_id, s.name_normalised, t.currency_code,
+       t.total_awarded_amount, t.award_count, t.shared_award_count, t.refreshed_at
+from mart.supplier_award_totals t
+join mart.suppliers s on s.supplier_id = t.supplier_id;
 
 -- What source/period the ETL actually loaded, and how the run finished.
 -- MIRA-API needs this to tell "zero rows because nothing was awarded" apart
