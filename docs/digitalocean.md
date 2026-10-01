@@ -319,6 +319,28 @@ El ajuste de consultas pertenece a MIRA-API (`db/procedures.py`): pagina y conte
 separados dentro de una sentencia y agrupacion directa de estados. Ambas partes
 son necesarias; aumentar el timeout no fue la correccion aplicada.
 
+## Conteos por categoria (01/10/2026)
+
+`idx_awards_process_count_cover`, definido en SQL 002, incluye `award_id` y
+`award_status` en el indice de `process_id`. Permite resolver el identificador
+y la elegibilidad de las adjudicaciones con menos lecturas de la tabla al
+contar adjudicaciones por proveedor y categoria. No cambia que adjudicaciones
+se incluyen. La posibilidad de evitar lecturas de la tabla tambien depende
+del mapa de visibilidad mantenido por VACUUM.
+
+En una base existente, instalar solo este indice fuera de una transaccion:
+
+```sql
+create index concurrently if not exists idx_awards_process_count_cover
+    on mart.awards (process_id) include (award_id, award_status);
+```
+
+Comprobar `pg_index.indisvalid` y medir el SQL original con
+`EXPLAIN (ANALYZE, BUFFERS)` bajo el rol `mira_query`, tanto para Guatemala
+como para los cuatro paises. Comparar resultados, lecturas y tiempos antes
+de considerar resuelto el timeout. El indice anterior se conserva: cualquier
+retiro requiere evaluar sus otros usos. Este cambio no aumenta el timeout.
+
 ## Rankings y acumulados por proveedor (24/09/2026)
 
 `idx_awards_amount_desc` permite buscar la mayor adjudicacion sin ordenar

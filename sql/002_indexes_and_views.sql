@@ -134,6 +134,11 @@ create index if not exists idx_items_process
 create index if not exists idx_awards_process
     on mart.awards (process_id);
 
+-- Category counts need the award id and eligibility status for each process.
+-- Keep those fields in the index to avoid a heap lookup for every matched award.
+create index if not exists idx_awards_process_count_cover
+    on mart.awards (process_id) include (award_id, award_status);
+
 create index if not exists idx_awards_award_date
     on mart.awards (award_date);
 
